@@ -1148,6 +1148,7 @@ server <- function(input, output, session) {
         fillOpacity = 0.4,
         fillColor = "#00008B",
         label = ~name,
+        layerId = ~name,
         group = "All Landmarks"
       )
     }
@@ -1237,7 +1238,25 @@ server <- function(input, output, session) {
         fillOpacity = 0.4,
         fillColor = "#00008B",
         label = ~name,
+        layerId = ~name,
         group = "All Landmarks"
+      )
+    }
+  })
+
+  # Handle landmark marker clicks
+  observeEvent(input$map_parking_marker_click, {
+    click <- input$map_parking_marker_click
+    if (is.null(click$id)) return()
+
+    # Check if clicked marker is a landmark (not a parking zone)
+    # Landmarks use their name as layerId, parking zones use "Zone XXX"
+    if (!startsWith(click$id, "Zone ") && click$id != "No Zone ID") {
+      # Update the landmark selection dropdown
+      updateSelectizeInput(
+        session,
+        "lm_name_parking",
+        selected = click$id
       )
     }
   })
