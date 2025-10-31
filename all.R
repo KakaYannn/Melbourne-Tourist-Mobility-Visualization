@@ -1233,6 +1233,7 @@ server <- function(input, output, session) {
         fillOpacity = 0.4,
         fillColor = "#00008B",
         label = ~name,
+        layerId = ~name,
         group = "All Landmarks"
       )
     }
@@ -1257,11 +1258,15 @@ server <- function(input, output, session) {
           label = ~paste0("Zone ", zone_id),
           popup = ~popup_html,
           group = "All Parking Zones",
-          clusterOptions = markerClusterOptions()
+          clusterOptions = markerClusterOptions(
+            showCoverageOnHover = FALSE,
+            spiderfyOnMaxZoom = TRUE,
+            removeOutsideVisibleBounds = TRUE
+          )
         )
       }
 
-      # Add unmatched segments (orange markers with clustering)
+      # Add unmatched segments (orange markers)
       unmatched <- zones_display |> dplyr::filter(has_zone == FALSE)
       if (nrow(unmatched) > 0) {
         # Create popup for unmatched segments
@@ -1279,7 +1284,11 @@ server <- function(input, output, session) {
           label = ~"No Zone ID",
           popup = ~popup_html,
           group = "All Parking Zones",
-          clusterOptions = markerClusterOptions()
+          clusterOptions = markerClusterOptions(
+            showCoverageOnHover = FALSE,
+            spiderfyOnMaxZoom = TRUE,
+            removeOutsideVisibleBounds = TRUE
+          )
         )
       }
     }
@@ -1314,7 +1323,25 @@ server <- function(input, output, session) {
         fillOpacity = 0.4,
         fillColor = "#00008B",
         label = ~name,
+        layerId = ~name,
         group = "All Landmarks"
+      )
+    }
+  })
+
+  # Handle landmark marker clicks
+  observeEvent(input$map_parking_marker_click, {
+    click <- input$map_parking_marker_click
+    if (is.null(click$id)) return()
+
+    # Check if clicked marker is a landmark (not a parking zone)
+    # Landmarks use their name as layerId, parking zones use "Zone XXX"
+    if (!startsWith(click$id, "Zone ") && click$id != "No Zone ID") {
+      # Update the landmark selection dropdown
+      updateSelectizeInput(
+        session,
+        "lm_name_parking",
+        selected = click$id
       )
     }
   })
@@ -1394,7 +1421,7 @@ server <- function(input, output, session) {
           unmatched_segs <- zones_sf |> dplyr::filter(has_zone == FALSE)
         }
 
-        # Add zones with zone IDs (red with clustering)
+        # Add zones with zone IDs (red markers)
         if (nrow(zones_with_ids) > 0) {
           zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
 
@@ -1410,7 +1437,11 @@ server <- function(input, output, session) {
             label = ~paste0("Zone ", zone_id),
             popup = ~popup_html,
             group = "Filtered Zones",
-            clusterOptions = markerClusterOptions()
+            clusterOptions = markerClusterOptions(
+              showCoverageOnHover = FALSE,
+              spiderfyOnMaxZoom = TRUE,
+              removeOutsideVisibleBounds = TRUE
+            )
           )
         }
 
@@ -1430,7 +1461,11 @@ server <- function(input, output, session) {
             label = ~"No Zone ID",
             popup = ~popup_html,
             group = "Filtered Zones",
-            clusterOptions = markerClusterOptions()
+            clusterOptions = markerClusterOptions(
+              showCoverageOnHover = FALSE,
+              spiderfyOnMaxZoom = TRUE,
+              removeOutsideVisibleBounds = TRUE
+            )
           )
         }
 
@@ -1476,17 +1511,26 @@ server <- function(input, output, session) {
 
     total_zones <- nrow(zones_sf)
 
+    # Format landmark names for display
+    landmark_names <- input$lm_name_parking
+    if (length(landmark_names) <= 3) {
+      # Show all names if 3 or fewer
+      landmark_text <- paste(landmark_names, collapse = ", ")
+    } else {
+      # Show first 3 and add "etc."
+      landmark_text <- paste(c(landmark_names[1:3], "etc."), collapse = ", ")
+    }
+
     tags$div(
       class = "alert alert-success",
       role = "alert",
       tags$strong("Search Results: "),
       sprintf(
-        "Found %d parking zone%s within %d meters of %d landmark%s.",
+        "Found %d parking zone%s within %d meters of %s.",
         total_zones,
         ifelse(total_zones == 1, "", "s"),
         input$radius_m_parking,
-        length(input$lm_name_parking),
-        ifelse(length(input$lm_name_parking) == 1, "", "s")
+        landmark_text
       )
     )
   })
