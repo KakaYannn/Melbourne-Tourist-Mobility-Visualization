@@ -1426,17 +1426,26 @@ server <- function(input, output, session) {
 
     total_zones <- nrow(zones_sf)
 
+    # Format landmark names for display
+    landmark_names <- input$lm_name_parking
+    if (length(landmark_names) <= 3) {
+      # Show all names if 3 or fewer
+      landmark_text <- paste(landmark_names, collapse = ", ")
+    } else {
+      # Show first 3 and add "etc."
+      landmark_text <- paste(c(landmark_names[1:3], "etc."), collapse = ", ")
+    }
+
     tags$div(
       class = "alert alert-success",
       role = "alert",
       tags$strong("Search Results: "),
       sprintf(
-        "Found %d parking zone%s within %d meters of %d landmark%s.",
+        "Found %d parking zone%s within %d meters of %s.",
         total_zones,
         ifelse(total_zones == 1, "", "s"),
         input$radius_m_parking,
-        length(input$lm_name_parking),
-        ifelse(length(input$lm_name_parking) == 1, "", "s")
+        landmark_text
       )
     )
   })
