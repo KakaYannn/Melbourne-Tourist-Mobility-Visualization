@@ -596,12 +596,18 @@ ui <- navbarPage(
     title = 'Parking Locations',
     sidebarLayout(
       sidebarPanel(
+        selectInput(
+          inputId = 'type_parking',
+          label = 'POI Type',
+          choices = c('All', unique(pois$subtype)),
+          selected = 'All'
+        ),
         h4("Select Landmarks for Parking Search"),
         helpText("Choose one or more landmarks to find nearby parking"),
         selectizeInput(
           "lm_name_parking",
           "Landmark(s)",
-          choices = if (nrow(pois) > 0) sort(unique(pois$name)) else NULL,
+          choices = NULL,
           options = list(
             placeholder = "Type to search...",
             plugins = list('remove_button')
@@ -612,11 +618,8 @@ ui <- navbarPage(
                     min = 100, max = 1000, value = 300, step = 50,
                     ticks = TRUE, sep = ""),
         hr(),
-        tags$details(
-          tags$summary(
-            tags$strong("Parking Abbreviations Guide"),
-            style = "cursor: pointer; color: #2c3e50;"
-          ),
+        tags$div(
+          tags$strong("Parking Abbreviations Guide", style = "color: #2c3e50;"),
           tags$div(
             style = "margin-top: 10px; font-size: 12px; line-height: 1.6;",
             tags$table(
@@ -1043,9 +1046,29 @@ server <- function(input, output, session) {
   
   # --- Parking Visualisations ---
 
+  # Filtered POIs by type
+  filtered_pois_parking <- reactive({
+    if (input$type_parking == 'All') {
+      return(pois)
+    } else {
+      return(pois[pois$subtype == input$type_parking, ])
+    }
+  })
+
+  # Update landmark choices when POI type changes
+  observe({
+    filtered_pois <- filtered_pois_parking()
+    updateSelectizeInput(
+      session,
+      "lm_name_parking",
+      choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
+      selected = character(0)
+    )
+  })
+
   # Selected landmarks (for parking search)
   selected_landmarks_parking <- reactive({
-    lm <- pois
+    lm <- filtered_pois_parking()
     if (nrow(lm) == 0) return(lm)
 
     if (length(input$lm_name_parking) > 0) {
@@ -1114,11 +1137,12 @@ server <- function(input, output, session) {
       map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
     }
 
-    # Show ALL landmarks by default (small dark blue markers)
-    if (nrow(pois) > 0) {
+    # Show filtered landmarks by default (small dark blue markers)
+    filtered_pois <- filtered_pois_parking()
+    if (nrow(filtered_pois) > 0) {
       map <- addCircleMarkers(
         map,
-        data = pois,
+        data = filtered_pois,
         radius = 3,
         stroke = FALSE,
         fillOpacity = 0.4,
@@ -1187,6 +1211,27 @@ server <- function(input, output, session) {
     map <- hideGroup(map, "Filtered Zones")
 
     map
+  })
+
+  # Update landmarks on map when POI type changes
+  observeEvent(input$type_parking, {
+    filtered_pois <- filtered_pois_parking()
+
+    map <- leafletProxy("map_parking")
+    map <- clearGroup(map, "All Landmarks")
+
+    if (nrow(filtered_pois) > 0) {
+      map <- addCircleMarkers(
+        map,
+        data = filtered_pois,
+        radius = 3,
+        stroke = FALSE,
+        fillOpacity = 0.4,
+        fillColor = "#00008B",
+        label = ~name,
+        group = "All Landmarks"
+      )
+    }
   })
 
   # Update map layers when landmarks are selected
