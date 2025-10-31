@@ -142,6 +142,13 @@ stops$icon <- unname(mapicon[stops$mode])
 stations$colour <- rep('blue', nrow(stations))
 stations$icon <- rep('subway', nrow(stations))
 lines$colour <- unname(mapcolour[lines$mode])
+linecolour <- c('Sunbury' = '#ffbe00', 'Craigieburn' = '#ffbe00', 'Upfield' = '#ffbe00', 
+                'Mernda' = '#be1014', 'Hurstbridge' = '#be1014', 
+                'Lilydale' = '#152c6b', 'Belgrave' = '#152c6b', 'Alamein' = '#152c6b', 'Glen Waverley' = '#152c6b', 
+                'Pakenham' = '#279fd5', 'Cranbourne' = '#279fd5', 
+                'Frankston' = '#028430', 'Werribee' = '#028430', 'Williamstown' = '#028430', 
+                'Sandringham' = '#f178af', 'Flemington Racecourse' = '#95979a')
+lines$colour[lines$mode == 'METRO TRAIN'] <- linecolour[lines$shortname[lines$mode == 'METRO TRAIN']]
 
 # copy dataframes in epsg 3857 for distance measurements
 stops2 <- st_transform(stops, 3857)
@@ -860,7 +867,7 @@ server <- function(input, output, session) {
       tagList(
         h3(paste0(currstation$station, ' Station Patronage')), 
         h6(''), 
-        h4(paste0('Annual: ', currstation$annual)), 
+        h4(paste0('Annual: ', format(currstation$annual, big.mark = ','))), 
         h6(''), 
         girafeOutput('typeplot', height = 350), 
         h6(''), 
@@ -887,7 +894,7 @@ server <- function(input, output, session) {
       # create plot
       p <- ggplot(df) + 
         aes(x = type, y = value, tooltip = value) + 
-        geom_bar_interactive(stat = 'identity', fill = 'blue') + 
+        geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
         labs(title = 'Average Patronage per Day Type', x = NULL, y = 'Average Patronage') + 
         theme_minimal()
       
@@ -913,7 +920,7 @@ server <- function(input, output, session) {
       # create plot
       p <- ggplot(df) + 
         aes(x = time, y = value, tooltip = value) + 
-        geom_bar_interactive(stat = 'identity', fill = 'blue') + 
+        geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
         labs(title = 'Average Patronage per Time Period on Weekdays', x = NULL, y = 'Average Patronage') + 
         theme_minimal()
       
@@ -990,6 +997,10 @@ server <- function(input, output, session) {
     df$name <- factor(df$name, levels = df$name[order(df$nearest_count, decreasing = TRUE)])
     df$name <- forcats::fct_rev(df$name)
     
+    colourmap <- df %>% 
+      dplyr::distinct(subtype, colour)
+    colourvals <- setNames(colourmap$colour, colourmap$subtype)
+    
     p <- ggplot(df, aes(x = name, y = nearest_count, fill = subtype)) +
       geom_col() +
       coord_flip() +
@@ -997,7 +1008,7 @@ server <- function(input, output, session) {
            title = "Top 15 POIs by Nearby Pedestrian Volume") +
       theme_minimal(base_size = 14) +
       theme(legend.position = "bottom") + 
-      scale_fill_identity(guide = 'legend', breaks = unique(df$colour), labels = unique(df$colour), name = 'Type')
+      scale_fill_manual(values = colourvals, name = 'Type')
     
     ggplotly(p, tooltip = c("x", "y", "fill"))
   })
