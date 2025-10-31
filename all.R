@@ -596,21 +596,21 @@ ui <- navbarPage(
     title = 'Parking Locations',
     sidebarLayout(
       sidebarPanel(
-        selectInput(
-          inputId = 'type', 
-          label = 'POI Type', 
-          choices = c('All', unique(pois$subtype)), 
-          selected = 'All'
+        h4("Select Landmarks for Parking Search"),
+        helpText("Choose one or more landmarks to find nearby parking"),
+        selectizeInput(
+          "lm_name_parking",
+          "Landmark(s)",
+          choices = if (nrow(pois) > 0) sort(unique(pois$name)) else NULL,
+          options = list(
+            placeholder = "Type to search...",
+            plugins = list('remove_button')
+          ),
+          multiple = TRUE
         ),
-        sliderInput(
-          inputId = 'radius', 
-          label = 'Search Radius (Metres): ', 
-          min = 0, 
-          max = 2000, 
-          value = 500, 
-          step = 50, 
-          ticks = FALSE
-        ), 
+        sliderInput("radius_m_parking", "Search radius (meters)",
+                    min = 100, max = 1000, value = 300, step = 50,
+                    ticks = TRUE, sep = ""),
         hr(),
         tags$details(
           tags$summary(
@@ -658,13 +658,13 @@ ui <- navbarPage(
             )
           )
         ),
-        width = 3, 
+        width = 3,
         style = 'max-width: 400px'
       ),
       mainPanel(
         leafletOutput("map_parking", width = 800, height = 800),
         br(),
-        uiOutput("info_summary"),
+        uiOutput("info_summary_parking"),
         # JavaScript handlers for layer control checkbox manipulation
         tags$script(HTML("
           Shiny.addCustomMessageHandler('uncheckLayers', function(message) {
@@ -1042,48 +1042,232 @@ server <- function(input, output, session) {
     
   
   # --- Parking Visualisations ---
-  
-  # initial map with all landmarks shown
-  output$map_parking <- renderLeaflet({
-      
-    # filter type
-    if (input$type == 'All') {
-      currpois <- pois
-    } else {
-      currpois <- pois[pois$subtype == input$type, ]
+
+  # Selected landmarks (for parking search)
+  selected_landmarks_parking <- reactive({
+    lm <- pois
+    if (nrow(lm) == 0) return(lm)
+
+    if (length(input$lm_name_parking) > 0) {
+      lm <- lm |> dplyr::filter(name %in% input$lm_name_parking)
     }
-    
-    leaflet() %>%
-      
-      # base map
-      addProviderTiles(providers$CartoDB) %>%
-      
-      # boundary
-      addPolygons(data = boundary, 
-                  color = 'black', 
-                  weight = 3, 
-                  fill = FALSE) %>%
-      
-      # pois
-      addAwesomeMarkers(., data = currpois, lng = ~lon, lat = ~lat, 
-                        icon = ~awesomeIcons(library = 'fa', 
-                                             markerColor = ~colour, 
-                                             icon = ~icon, 
-                                             iconColor = '#ffffff'), 
-                        label = ~name, 
-                        layerId = ~id, 
-                        group = 'pois') %>%
-      
-    { map <- .
-    
-      # Show ALL parking zones and unmatched segments by default
-      if (!is.null(zones_display) && nrow(zones_display) > 0) {
-        # Add zones with zone IDs (red markers with clustering)
-        zones_with_ids <- zones_display |> dplyr::filter(has_zone == TRUE)
+    lm
+  })
+
+  # Combined buffer around all selected landmarks
+  combined_buffer_parking <- reactive({
+    sel_lm <- selected_landmarks_parking()
+    req(nrow(sel_lm) > 0)
+
+    # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
+    # Falls back to 3857 if transformation fails
+    lm_proj <- tryCatch({
+      sf::st_transform(sel_lm, 7899)
+    }, error = function(e) {
+      message("EPSG:7899 not available, using EPSG:3857")
+      sf::st_transform(sel_lm, 3857)
+    })
+
+    # Create buffer around each landmark
+    buf <- sf::st_buffer(lm_proj, dist = input$radius_m_parking)
+
+    # Union all buffers into one
+    if (nrow(buf) > 1) {
+      buf <- sf::st_union(buf) |> sf::st_sf()
+    }
+
+    sf::st_transform(buf, 4326)
+  })
+
+  # Filter zones by landmark buffer
+  zones_in_radius_parking <- reactive({
+    req(nrow(selected_landmarks_parking()) > 0)
+    buf <- combined_buffer_parking()
+    req(nrow(buf) > 0)
+
+    # Spatial filter: zones that intersect with buffer
+    if (!is.null(zones_display) && nrow(zones_display) > 0) {
+      intersects <- sf::st_intersects(zones_display, buf, sparse = FALSE)
+      zones_filtered <- zones_display[as.vector(intersects), ]
+      return(zones_filtered)
+    } else {
+      # Return empty data frame with expected structure
+      return(data.frame(zone_id = character(0), sign_text = character(0)))
+    }
+  })
+
+  # Initial map with all landmarks shown
+  output$map_parking <- renderLeaflet({
+    map <- leaflet(options = leafletOptions(minZoom = 11)) |>
+      addProviderTiles(providers$CartoDB.Positron)
+
+    if (nrow(boundary) > 0) {
+      bb <- sf::st_bbox(boundary)
+      map <- fitBounds(map,
+                       lng1 = as.numeric(bb["xmin"]),
+                       lat1 = as.numeric(bb["ymin"]),
+                       lng2 = as.numeric(bb["xmax"]),
+                       lat2 = as.numeric(bb["ymax"]))
+      map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
+                        fill = FALSE, group = "Boundary")
+    } else {
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
+    }
+
+    # Show ALL landmarks by default (small dark blue markers)
+    if (nrow(pois) > 0) {
+      map <- addCircleMarkers(
+        map,
+        data = pois,
+        radius = 3,
+        stroke = FALSE,
+        fillOpacity = 0.4,
+        fillColor = "#00008B",
+        label = ~name,
+        group = "All Landmarks"
+      )
+    }
+
+    # Show ALL parking zones and unmatched segments by default
+    if (!is.null(zones_display) && nrow(zones_display) > 0) {
+      # Add zones with zone IDs (red markers with clustering)
+      zones_with_ids <- zones_display |> dplyr::filter(has_zone == TRUE)
+      if (nrow(zones_with_ids) > 0) {
+        # Create table popup for each zone using sign_plates data
+        zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
+
+        map <- addAwesomeMarkers(
+          map,
+          data = zones_with_ids,
+          icon = awesomeIcons(
+            icon = "car",
+            library = "fa",
+            markerColor = "red",
+            iconColor = "white"
+          ),
+          label = ~paste0("Zone ", zone_id),
+          popup = ~popup_html,
+          group = "All Parking Zones",
+          clusterOptions = markerClusterOptions()
+        )
+      }
+
+      # Add unmatched segments (orange markers with clustering)
+      unmatched <- zones_display |> dplyr::filter(has_zone == FALSE)
+      if (nrow(unmatched) > 0) {
+        # Create popup for unmatched segments
+        unmatched <- create_unmatched_popups(unmatched)
+
+        map <- addAwesomeMarkers(
+          map,
+          data = unmatched,
+          icon = awesomeIcons(
+            icon = "car",
+            library = "fa",
+            markerColor = "orange",
+            iconColor = "white"
+          ),
+          label = ~"No Zone ID",
+          popup = ~popup_html,
+          group = "All Parking Zones",
+          clusterOptions = markerClusterOptions()
+        )
+      }
+    }
+
+    # Add layer control
+    map <- addLayersControl(
+      map,
+      overlayGroups = c("Boundary", "All Landmarks", "All Parking Zones", "Buffer"),
+      options = layersControlOptions(collapsed = FALSE)
+    )
+
+    # Initially hide filtered groups
+    map <- hideGroup(map, "Filtered Landmarks")
+    map <- hideGroup(map, "Filtered Zones")
+
+    map
+  })
+
+  # Update map layers when landmarks are selected
+  observeEvent(c(input$lm_name_parking, input$radius_m_parking), {
+    req(nrow(pois) > 0)
+    req(!is.null(zones_display))
+
+    map <- leafletProxy("map_parking")
+    map <- clearGroup(map, "Buffer")
+    map <- clearGroup(map, "Filtered Landmarks")
+    map <- clearGroup(map, "Filtered Zones")
+
+    # Check if user has filter active
+    has_filter <- length(input$lm_name_parking) > 0
+
+    if (has_filter) {
+      # User applied filter
+      sel_lm <- selected_landmarks_parking()
+      buf <- combined_buffer_parking()
+      zones_sf <- zones_in_radius_parking()
+
+      # Hide "All" groups and uncheck their checkboxes
+      map <- hideGroup(map, "All Landmarks")
+      map <- hideGroup(map, "All Parking Zones")
+
+      # Send JavaScript command to uncheck the checkboxes
+      session$sendCustomMessage(type = "uncheckLayers", message = list())
+
+      # Add buffer zones
+      map <- addPolygons(
+        map,
+        data = buf,
+        fill = TRUE,
+        fillOpacity = 0.08,
+        color = "#1f78b4",
+        weight = 2,
+        group = "Buffer"
+      )
+
+      # Automatically pan and zoom to the selected landmarks
+      if (nrow(sel_lm) > 0) {
+        bounds <- sf::st_bbox(buf)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
+      }
+
+      # Add filtered landmarks (larger red markers)
+      sel_lm_data <- sel_lm
+      sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
+
+      map <- addCircleMarkers(
+        map,
+        data = sel_lm_data,
+        radius = 8,
+        stroke = TRUE,
+        weight = 2,
+        fillOpacity = 0.9,
+        fillColor = "#e31a1c",
+        color = "#fff",
+        label = ~name,
+        popup = ~popup_text,
+        group = "Filtered Landmarks"
+      )
+
+      # Show filtered landmarks
+      map <- showGroup(map, "Filtered Landmarks")
+
+      # Add filtered parking zones
+      if (nrow(zones_sf) > 0) {
+        # Split into zones with IDs and unmatched segments
+        zones_with_ids <- zones_sf
+        unmatched_segs <- zones_sf
+        if ("has_zone" %in% names(zones_sf)) {
+          zones_with_ids <- zones_sf |> dplyr::filter(has_zone == TRUE)
+          unmatched_segs <- zones_sf |> dplyr::filter(has_zone == FALSE)
+        }
+
+        # Add zones with zone IDs (red with clustering)
         if (nrow(zones_with_ids) > 0) {
-          # Create table popup for each zone using sign_plates data
           zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
-          
+
           map <- addAwesomeMarkers(
             map,
             data = zones_with_ids,
@@ -1095,20 +1279,18 @@ server <- function(input, output, session) {
             ),
             label = ~paste0("Zone ", zone_id),
             popup = ~popup_html,
-            group = "All Parking Zones",
-            clusterOptions = markerClusterOptions()  # ADD CLUSTERING
+            group = "Filtered Zones",
+            clusterOptions = markerClusterOptions()
           )
         }
-        
-        # Add unmatched segments (orange markers with clustering)
-        unmatched <- zones_display |> dplyr::filter(has_zone == FALSE)
-        if (nrow(unmatched) > 0) {
-          # Create popup for unmatched segments
-          unmatched <- create_unmatched_popups(unmatched)
-          
+
+        # Add unmatched segments
+        if (nrow(unmatched_segs) > 0) {
+          unmatched_segs <- create_unmatched_popups(unmatched_segs)
+
           map <- addAwesomeMarkers(
             map,
-            data = unmatched,
+            data = unmatched_segs,
             icon = awesomeIcons(
               icon = "car",
               library = "fa",
@@ -1117,13 +1299,66 @@ server <- function(input, output, session) {
             ),
             label = ~"No Zone ID",
             popup = ~popup_html,
-            group = "All Parking Zones",
-            clusterOptions = markerClusterOptions()  # ADD CLUSTERING
+            group = "Filtered Zones",
+            clusterOptions = markerClusterOptions()
           )
         }
+
+        # Show filtered zones
+        map <- showGroup(map, "Filtered Zones")
       }
-      map
+
+    } else {
+      # No filter applied - show "All" groups, hide "Filtered" groups
+      map <- hideGroup(map, "Filtered Landmarks")
+      map <- hideGroup(map, "Filtered Zones")
+      map <- showGroup(map, "All Landmarks")
+      map <- showGroup(map, "All Parking Zones")
+
+      # Send JavaScript command to re-check the checkboxes
+      session$sendCustomMessage(type = "recheckLayers", message = list())
     }
+  })
+
+  # Summary info box
+  output$info_summary_parking <- renderUI({
+    if (length(input$lm_name_parking) == 0) {
+      return(tags$div(
+        class = "alert alert-secondary",
+        role = "alert",
+        tags$strong("Welcome! "),
+        sprintf(
+          "Select one or more landmarks from the sidebar to find nearby parking zones. %d landmarks shown on map.",
+          nrow(pois)
+        )
+      ))
+    }
+
+    zones_sf <- zones_in_radius_parking()
+    if (nrow(zones_sf) == 0) {
+      return(tags$div(
+        class = "alert alert-warning",
+        role = "alert",
+        tags$strong("No parking zones found "),
+        sprintf("within %d meters of selected landmark(s). Try increasing the search radius or selecting landmarks in central Melbourne.", input$radius_m_parking)
+      ))
+    }
+
+    total_zones <- nrow(zones_sf)
+
+    tags$div(
+      class = "alert alert-success",
+      role = "alert",
+      tags$strong("Search Results: "),
+      sprintf(
+        "Found %d parking zone%s within %d meters of %d landmark%s.",
+        total_zones,
+        ifelse(total_zones == 1, "", "s"),
+        input$radius_m_parking,
+        length(input$lm_name_parking),
+        ifelse(length(input$lm_name_parking) == 1, "", "s")
+      )
+    )
   })
   
   
