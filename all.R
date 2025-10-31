@@ -59,24 +59,9 @@ poiscolour <- setNames(c('lightblue', 'purple', 'darkpurple', 'black', 'black',
                          'Office', 'Outdoor Recreation Facility (Zoo, Golf Course)', 'Police Station', 'Private Hospital', 'Private Sports Club/Facility', 
                          'Public Buildings', 'Public Hospital', 'Retail', 'Store Yard', 'Synagogue', 
                          'Theatre Live', 'Visitor Centre'))
-poisicon <- setNames(c('anchor', 'film', 'gift', 'crosshairs', 'user', 
-                       'film', 'shopping-cart', 'film', 'fire', 'flag', 
-                       'building', 'bolt', 'bed', 'gamepad', 'industry', 
-                       'leaf', 'book', 'futbol-o', 'hospital-o', 'eye', 
-                       'building', 'paw', 'car', 'hospital-o', 'futbol-o', 
-                       'building', 'hospital-o', 'shopping-cart', 'truck', 'user', 
-                       'film', 'info-circle'), 
-                     c('Aquarium', 'Art Gallery/Museum', 'Casino', 'Cemetery', 'Church', 
-                       'Cinema', 'Department Store', 'Film & RV Studio', 'Fire Station', 'Function/Conference/Exhibition Centre', 
-                       'Government Building', 'Gymnasium/Health Club', 'Hostel', 'Indoor Recreation Facility', 'Industrial (Manufacturing)', 
-                       'Informal Outdoor Facility (Park/Garden/Reserve)', 'Library', 'Major Sports & Recreation Facility', 'Medical Services', 'Observation Tower/Wheel', 
-                       'Office', 'Outdoor Recreation Facility (Zoo, Golf Course)', 'Police Station', 'Private Hospital', 'Private Sports Club/Facility', 
-                       'Public Buildings', 'Public Hospital', 'Retail', 'Store Yard', 'Synagogue', 
-                       'Theatre Live', 'Visitor Centre'))
 pois$colour <- unname(poiscolour[pois$subtype])
-pois$icon <- unname(poisicon[pois$subtype])
 
-# copy dataframes in epsg 3857 for distance measurements
+# copy dataframe in epsg 3857 for distance measurements
 pois2 <- st_transform(pois, 3857)
 
 
@@ -155,50 +140,6 @@ lines$colour[lines$mode == 'METRO TRAIN'] <- linecolour[lines$shortname[lines$mo
 stops2 <- st_transform(stops, 3857)
 stations2 <- st_transform(stations, 3857)
 lines2 <- st_transform(lines, 3857)
-
-
-
-# --- Crime Preprocess ---
-# Load and preprocess data
-load_data <- function() {
-  file_path <- "Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx"
-  
-  # Table 01: Overall offence counts by LGA
-  table01 <- read_excel(file_path, sheet = "Table 01") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  # Table 02: Offences by category (Division, Subdivision, Subgroup)
-  table02 <- read_excel(file_path, sheet = "Table 02") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  # Table 03: Offences by suburb/postcode
-  table03 <- read_excel(file_path, sheet = "Table 03") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  # Table 04: Offences by location type
-  table04 <- read_excel(file_path, sheet = "Table 04") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  # Table 05: Investigation status
-  table05 <- read_excel(file_path, sheet = "Table 05") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  # Table 06: Drug offences
-  table06 <- read_excel(file_path, sheet = "Table 06") %>%
-    filter(`Local Government Area` == "Melbourne")
-  
-  list(
-    table01 = table01,
-    table02 = table02,
-    table03 = table03,
-    table04 = table04,
-    table05 = table05,
-    table06 = table06
-  )
-}
-
-# Load data
-crime_data <- load_data()
 
 
 
@@ -556,8 +497,52 @@ if (!is.null(unmatched_segments) && nrow(unmatched_segments) > 0) {
 
 
 
-# --- UI ---
+# --- Crime Preprocess ---
 
+# Load and preprocess data
+load_data <- function() {
+  file_path <- "Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx"
+  
+  # Table 01: Overall offence counts by LGA
+  table01 <- read_excel(file_path, sheet = "Table 01") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 02: Offences by category (Division, Subdivision, Subgroup)
+  table02 <- read_excel(file_path, sheet = "Table 02") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 03: Offences by suburb/postcode
+  table03 <- read_excel(file_path, sheet = "Table 03") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 04: Offences by location type
+  table04 <- read_excel(file_path, sheet = "Table 04") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 05: Investigation status
+  table05 <- read_excel(file_path, sheet = "Table 05") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 06: Drug offences
+  table06 <- read_excel(file_path, sheet = "Table 06") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  list(
+    table01 = table01,
+    table02 = table02,
+    table03 = table03,
+    table04 = table04,
+    table05 = table05,
+    table06 = table06
+  )
+}
+
+# Load data
+crime_data <- load_data()
+
+
+
+# --- UI ---
 ui <- navbarPage(
   id = 'mypage', 
   title = '',
@@ -590,7 +575,7 @@ ui <- navbarPage(
       mainPanel(
         fluidRow(
           column(8, leafletOutput('mappt', width = 800, height = 800)), 
-          column(4, uiOutput('patronage'))
+          column(4, uiOutput('infopt'))
         )
       )
     )
@@ -753,6 +738,8 @@ ui <- navbarPage(
     )
   ),
   
+  
+  
   # --- Crime Tab ---
   tabPanel(
     "Melbourne Crime",
@@ -793,9 +780,6 @@ server <- function(input, output, session) {
 
 # --- PT Visualisations ---
   
-  # station select
-  selectedstation <- reactiveVal(NULL)
-  
   # create map
   output$mappt <- renderLeaflet({
     
@@ -818,14 +802,15 @@ server <- function(input, output, session) {
                   fill = FALSE) %>%
       
       # pois
-      addAwesomeMarkers(., data = currpois, lng = ~lon, lat = ~lat, 
-                        icon = ~awesomeIcons(library = 'fa', 
-                                             markerColor = ~colour, 
-                                             icon = ~icon, 
-                                             iconColor = '#ffffff'), 
-                        label = ~name, 
-                        layerId = ~id, 
-                        group = 'pois')
+      addCircleMarkers(., data = currpois, lng = ~lon, lat = ~lat, 
+                       radius = 7, 
+                       stroke = FALSE, 
+                       fill = TRUE, 
+                       fillColor = ~colour, 
+                       fillOpacity = 1, 
+                       label = ~name, 
+                       layerId = ~id, 
+                       group = 'pois')
   })
   
   # on click
@@ -841,7 +826,6 @@ server <- function(input, output, session) {
     # poi click
     if (startsWith(id, 'poi')) {
       currpoi <- pois2[pois$id == id, ]
-      selectedstation(NULL)
       
       # find stops and stations closest to clicked poi
       radius <- input$radius
@@ -878,9 +862,8 @@ server <- function(input, output, session) {
     }
     
     # stop click
-    if (startsWith(id, 'stop')) {
+    else if (startsWith(id, 'stop')) {
       currstop <- stops2[stops$id == id, ]
-      selectedstation(NULL)
       
       # find lines associated with stop
       linesnear <- lines[as.numeric(st_distance(lines2, currstop)) <= 30, ]
@@ -898,12 +881,23 @@ server <- function(input, output, session) {
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
+      
+      # stop info box
+      output$infopt <- renderUI({
+        
+        # panel
+        tagList(
+          h3(currstop$name), 
+          h6(''), 
+          h4('Routes:'), 
+          tags$ul(lapply(unique(linesnear$shortname), tags$li))
+        )
+      })
     }
     
     # station click
-    if (startsWith(id, 'station')) {
+    else if (startsWith(id, 'station')) {
       currstation <- stations2[stations2$id == id, ]
-      selectedstation(id)
       
       # find lines associated with station
       linesnear <- lines[as.numeric(st_distance(lines2, currstation)) <= 500, ]
@@ -921,84 +915,74 @@ server <- function(input, output, session) {
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
+    
+      # station info box
+      output$infopt <- renderUI({
+        
+        # panel
+        tagList(
+          h3(paste0(currstation$station, ' Station')), 
+          h6(''), 
+          h4('Lines:'), 
+          tags$ul(lapply(unique(linesnear$shortname), tags$li)),
+          h6(''), 
+          h4(paste0('Annual Patronage: ', format(currstation$annual, big.mark = ','))), 
+          h6(''), 
+          girafeOutput('typeplot', height = 300), 
+          h6(''), 
+          girafeOutput('timeplot', height = 300)
+        )
+      })
+      
+      # type of day patronage
+      output$typeplot <- renderGirafe({
+        
+        # create dataframe
+        df <- data.frame(
+          type = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'), 
+          value = c(currstation$weekday, 
+                    currstation$normalweekday, 
+                    currstation$schholweekday, 
+                    currstation$saturday, 
+                    currstation$sunday)
+        )
+        df$type <- factor(df$type, levels = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'))
+        
+        # create plot
+        p <- ggplot(df) + 
+          aes(x = type, y = value, tooltip = value) + 
+          geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
+          labs(title = 'Average Patronage per Day Type', x = NULL, y = 'Average Patronage') + 
+          theme_minimal()
+        
+        girafe(ggobj = p)
+      })
+    
+      # time of day patronage
+      output$timeplot <- renderGirafe({
+        
+        # create dataframe
+        df <- data.frame(
+          time = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'), 
+          value = c(currstation$early, 
+                    currstation$ampeak, 
+                    currstation$interpeak, 
+                    currstation$pmpeak, 
+                    currstation$late)
+        )
+        df$time <- factor(df$time, levels = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'))
+        
+        # create plot
+        p <- ggplot(df) + 
+          aes(x = time, y = value, tooltip = value) + 
+          geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
+          labs(title = 'Average Patronage per Time Period on Weekdays', x = NULL, y = 'Average Patronage') + 
+          theme_minimal()
+        
+        girafe(ggobj = p)
+      })
     }
-    
-    # station patronage charts
-    output$patronage <- renderUI({
-      stationid <- selectedstation()
-      currstation <- stations2[stations2$id == id, ]
-      
-      if (is.null(stationid)) {
-        return(NULL)
-      }
-      
-      # panel
-      tagList(
-        h3(paste0(currstation$station, ' Station Patronage')), 
-        h6(''), 
-        h4(paste0('Annual: ', format(currstation$annual, big.mark = ','))), 
-        h6(''), 
-        girafeOutput('typeplot', height = 350), 
-        h6(''), 
-        girafeOutput('timeplot', height = 350)
-      )
-    })
-    
-    # type of day patronage
-    output$typeplot <- renderGirafe({
-      stationid <- selectedstation()
-      currstation <- stations2[stations2$id == id, ]
-      
-      # create dataframe
-      df <- data.frame(
-        type = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'), 
-        value = c(currstation$weekday, 
-                  currstation$normalweekday, 
-                  currstation$schholweekday, 
-                  currstation$saturday, 
-                  currstation$sunday)
-      )
-      df$type <- factor(df$type, levels = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'))
-      
-      # create plot
-      p <- ggplot(df) + 
-        aes(x = type, y = value, tooltip = value) + 
-        geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
-        labs(title = 'Average Patronage per Day Type', x = NULL, y = 'Average Patronage') + 
-        theme_minimal()
-      
-      girafe(ggobj = p)
-    })
-    
-    # time of day patronage
-    output$timeplot <- renderGirafe({
-      stationid <- selectedstation()
-      currstation <- stations2[stations2$id == id, ]
-      
-      # create dataframe
-      df <- data.frame(
-        time = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'), 
-        value = c(currstation$early, 
-                  currstation$ampeak, 
-                  currstation$interpeak, 
-                  currstation$pmpeak, 
-                  currstation$late)
-      )
-      df$time <- factor(df$time, levels = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'))
-      
-      # create plot
-      p <- ggplot(df) + 
-        aes(x = time, y = value, tooltip = value) + 
-        geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
-        labs(title = 'Average Patronage per Time Period on Weekdays', x = NULL, y = 'Average Patronage') + 
-        theme_minimal()
-      
-      girafe(ggobj = p)
-    })
   })
-    
-    
-# --- Crime Visualisations ---    
     
     
     
@@ -1026,14 +1010,13 @@ server <- function(input, output, session) {
                   fill = FALSE) %>%
       
       # pois
-      addAwesomeMarkers(
+      addCircleMarkers(
         ., data = filtered_landmarks, lng = ~lon, lat = ~lat,
-        icon = ~awesomeIcons(
-          library = 'fa',
-          markerColor = ~colour,
-          icon = ~icon,
-          iconColor = '#ffffff'
-        ),
+        radius = 7, 
+        stroke = FALSE, 
+        fill = TRUE, 
+        fillColor = ~colour, 
+        fillOpacity = 1, 
         label = lapply(paste0(
           "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
           "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
@@ -1228,12 +1211,12 @@ server <- function(input, output, session) {
       map <- addCircleMarkers(
         map,
         data = filtered_pois,
-        radius = 3,
+        radius = 7,
         stroke = FALSE,
-        fillOpacity = 0.4,
-        fillColor = "#00008B",
+        fillOpacity = 1,
+        fillColor = ~colour,
         label = ~name,
-        layerId = ~name,
+        layerId = ~id,
         group = "All Landmarks"
       )
     }
@@ -1534,6 +1517,11 @@ server <- function(input, output, session) {
       )
     )
   })
+  
+  
+  
+  # --- Crime Visualisations ---
+  
   # Overview
   output$total_offences <- renderValueBox({
     total <- sum(crime_data$table01$`Offence Count`, na.rm = TRUE)
