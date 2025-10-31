@@ -21,6 +21,7 @@ library(bslib)
 library(readr)
 library(scales)
 library(DT)
+library(shinydashboard)
 
 
 
@@ -158,7 +159,46 @@ lines2 <- st_transform(lines, 3857)
 
 
 # --- Crime Preprocess ---
+# Load and preprocess data
+load_data <- function() {
+  file_path <- "Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx"
+  
+  # Table 01: Overall offence counts by LGA
+  table01 <- read_excel(file_path, sheet = "Table 01") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 02: Offences by category (Division, Subdivision, Subgroup)
+  table02 <- read_excel(file_path, sheet = "Table 02") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 03: Offences by suburb/postcode
+  table03 <- read_excel(file_path, sheet = "Table 03") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 04: Offences by location type
+  table04 <- read_excel(file_path, sheet = "Table 04") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 05: Investigation status
+  table05 <- read_excel(file_path, sheet = "Table 05") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  # Table 06: Drug offences
+  table06 <- read_excel(file_path, sheet = "Table 06") %>%
+    filter(`Local Government Area` == "Melbourne")
+  
+  list(
+    table01 = table01,
+    table02 = table02,
+    table03 = table03,
+    table04 = table04,
+    table05 = table05,
+    table06 = table06
+  )
+}
 
+# Load data
+crime_data <- load_data()
 
 
 
@@ -558,10 +598,6 @@ ui <- navbarPage(
   
   
   
-  # --- Crime Tab ---
-  
-  
-  
   # --- Pedestrian Tab ---
   tabPanel(
     title = 'Pedestrian Counts',
@@ -713,6 +749,36 @@ ui <- navbarPage(
             }, 100);
           });
         "))
+      )
+    )
+  ),
+  
+  # --- Crime Tab ---
+  tabPanel(
+    "Melbourne Crime",
+    fluidPage(
+      titlePanel("Melbourne Crime Statistics - Year Ending June 2025"),
+      fluidRow(
+        column(
+          width = 3,
+          wellPanel(
+            h4("Sub-Tabs"),
+            tags$ul(
+              style = "list-style-type:none; padding-left:0;",
+              tags$li(actionLink("nav_overview", "Overview")),
+              tags$li(actionLink("nav_categories", "Offence Categories")),
+              tags$li(actionLink("nav_suburbs", "Suburbs Analysis")),
+              tags$li(actionLink("nav_locations", "Location Types")),
+              tags$li(actionLink("nav_investigation", "Investigation Status")),
+              tags$li(actionLink("nav_drugs", "Drug Offences")),
+              tags$li(actionLink("nav_tables", "Data Tables"))
+            )
+          )
+        ),
+        column(
+          width = 9,
+          uiOutput("crime_main_panel")
+        )
       )
     )
   )
@@ -960,17 +1026,25 @@ server <- function(input, output, session) {
                   fill = FALSE) %>%
       
       # pois
-      addAwesomeMarkers(., data = filtered_landmarks, lng = ~lon, lat = ~lat, 
-                        icon = ~awesomeIcons(library = 'fa', 
-                                             markerColor = ~colour, 
-                                             icon = ~icon, 
-                                             iconColor = '#ffffff'), 
-                        label = ~paste0(
-                          name, ': ', 
-                          format(round(nearest_count), big.mark = ",")
-                        ),
-                        layerId = ~id, 
-                        group = 'pois') %>%
+      addAwesomeMarkers(
+        ., data = filtered_landmarks, lng = ~lon, lat = ~lat,
+        icon = ~awesomeIcons(
+          library = 'fa',
+          markerColor = ~colour,
+          icon = ~icon,
+          iconColor = '#ffffff'
+        ),
+        label = lapply(paste0(
+          "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
+          "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
+        ), htmltools::HTML),
+        labelOptions = labelOptions(
+          style = list("font-size" = "12px", "font-family" = "Arial"),
+          direction = "auto"
+        ),
+        layerId = ~id,
+        group = 'pois'
+      ) %>%
       
       # heatmap
       addHeatmap(
@@ -1414,6 +1488,321 @@ server <- function(input, output, session) {
         length(input$lm_name_parking),
         ifelse(length(input$lm_name_parking) == 1, "", "s")
       )
+    )
+  })
+  # Overview
+  output$total_offences <- renderValueBox({
+    total <- sum(crime_data$table01$`Offence Count`, na.rm = TRUE)
+    valueBox(format(total, big.mark = ","), "Total Offences",
+             icon = icon("exclamation-triangle"), color = "red")
+  })
+  
+  output$crime_rate <- renderValueBox({
+    rate <- mean(crime_data$table01$`Rate per 100,000 population`, na.rm = TRUE)
+    valueBox(round(rate, 1), "Crime Rate per 100,000",
+             icon = icon("chart-line"), color = "orange")
+  })
+  
+  output$police_region <- renderValueBox({
+    region <- unique(crime_data$table01$`Police Region`)[1]
+    valueBox(region, "Police Region",
+             icon = icon("shield"), color = "blue")
+  })
+  
+  output$overview_summary <- renderPrint({
+    summary(crime_data$table01)
+  })
+  
+  # Offence Categories
+  output$category_plot <- renderPlotly({
+    category_data <- crime_data$table02 %>%
+      group_by(!!sym(input$category_level)) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      arrange(desc(Total)) %>%
+      rename(Category = !!sym(input$category_level))
+    plot_ly(category_data,
+            x = ~reorder(Category, Total),
+            y = ~Total, type = 'bar',
+            marker = list(color = 'steelblue')) %>%
+      layout(title = paste("Offences by", input$category_level),
+             xaxis = list(title = input$category_level, tickangle = -45),
+             yaxis = list(title = "Number of Offences"))
+  })
+  
+  output$top_categories <- renderPlotly({
+    category_data <- crime_data$table02 %>%
+      group_by(!!sym(input$category_level)) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      arrange(desc(Total)) %>% head(10) %>%
+      rename(Category = !!sym(input$category_level))
+    plot_ly(category_data, labels = ~Category, values = ~Total, type = 'pie',
+            textposition = 'inside', textinfo = 'label+percent') %>%
+      layout(title = "Top 10 Categories")
+  })
+  
+  output$category_rate <- renderPlotly({
+    rate_data <- crime_data$table02 %>%
+      group_by(!!sym(input$category_level)) %>%
+      summarise(AvgRate = mean(`LGA Rate per 100,000 population`, na.rm = TRUE)) %>%
+      arrange(desc(AvgRate)) %>% head(10) %>%
+      rename(Category = !!sym(input$category_level))
+    plot_ly(rate_data,
+            x = ~AvgRate, y = ~reorder(Category, AvgRate),
+            type = 'bar', orientation = 'h',
+            marker = list(color = 'coral')) %>%
+      layout(title = "Crime Rate by Category (Top 10)",
+             xaxis = list(title = "Rate per 100,000"), yaxis = list(title = ""))
+  })
+  
+  # Suburbs Analysis
+  output$suburb_plot <- renderPlotly({
+    suburb_data <- crime_data$table03
+    if (input$suburb_category != "All") {
+      suburb_data <- suburb_data %>% filter(`Offence Division` == input$suburb_category)
+    }
+    suburb_summary <- suburb_data %>%
+      group_by(`Suburb/Town Name`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      arrange(desc(Total))
+    plot_ly(suburb_summary,
+            x = ~reorder(`Suburb/Town Name`, Total),
+            y = ~Total, type = 'bar', marker = list(color = 'darkgreen')) %>%
+      layout(title = "Offences by Suburb",
+             xaxis = list(title = "Suburb", tickangle = -45),
+             yaxis = list(title = "Number of Offences"))
+  })
+  
+  output$top_suburbs <- renderPlotly({
+    suburb_data <- crime_data$table03 %>%
+      group_by(`Suburb/Town Name`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      arrange(desc(Total)) %>% head(10)
+    plot_ly(suburb_data,
+            y = ~reorder(`Suburb/Town Name`, Total),
+            x = ~Total, type = 'bar', orientation = 'h',
+            marker = list(color = 'forestgreen')) %>%
+      layout(title = "Top 10 Suburbs")
+  })
+  
+  output$postcode_plot <- renderPlotly({
+    postcode_data <- crime_data$table03 %>%
+      group_by(Postcode) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      arrange(desc(Total))
+    plot_ly(postcode_data,
+            x = ~as.factor(Postcode), y = ~Total,
+            type = 'bar', marker = list(color = 'teal')) %>%
+      layout(title = "Offences by Postcode")
+  })
+  
+  # Location Types
+  output$location_plot <- renderPlotly({
+    location_data <- crime_data$table04 %>%
+      group_by(!!sym(input$location_level)) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      rename(Location = !!sym(input$location_level))
+    plot_ly(location_data, x = ~reorder(Location, Total), y = ~Total,
+            type = 'bar', marker = list(color = 'purple')) %>%
+      layout(title = paste("Offences by", input$location_level))
+  })
+  
+  output$location_sunburst <- renderPlotly({
+    level1 <- crime_data$table04 %>%
+      group_by(`Location Division`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+      mutate(labels = `Location Division`, parents = "")
+    level2 <- crime_data$table04 %>%
+      group_by(`Location Division`, `Location Subdivision`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+      mutate(labels = `Location Subdivision`, parents = `Location Division`)
+    level3 <- crime_data$table04 %>%
+      group_by(`Location Subdivision`, `Location Group`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+      mutate(labels = `Location Group`, parents = `Location Subdivision`)
+    sunburst_data <- bind_rows(level1, level2, level3) %>% select(labels, parents, Total)
+    plot_ly(sunburst_data, labels = ~labels, parents = ~parents, values = ~Total,
+            type = 'sunburst', branchvalues = 'total')
+  })
+  
+  # Investigation
+  output$investigation_pie <- renderPlotly({
+    investigation_data <- crime_data$table05 %>%
+      group_by(`Investigation Status`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
+    plot_ly(investigation_data,
+            labels = ~`Investigation Status`, values = ~Total,
+            type = 'pie', textposition = 'inside', textinfo = 'label+percent')
+  })
+  
+  output$investigation_bar <- renderPlotly({
+    investigation_data <- crime_data$table05 %>%
+      group_by(`Investigation Status`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
+    plot_ly(investigation_data,
+            x = ~`Investigation Status`, y = ~Total,
+            type = 'bar', marker = list(color = 'indianred'))
+  })
+  
+  output$investigation_table <- renderDT({
+    investigation_data <- crime_data$table05 %>%
+      group_by(`Investigation Status`) %>%
+      summarise(`Total Offences` = sum(`Offence Count`, na.rm = TRUE),
+                `Percentage` = round(sum(`Offence Count`, na.rm = TRUE) /
+                                       sum(crime_data$table05$`Offence Count`, na.rm = TRUE) * 100, 2))
+    datatable(investigation_data, options = list(pageLength = 10))
+  })
+  
+  # Drug Offences
+  output$drug_plot <- renderPlotly({
+    drug_data <- crime_data$table06 %>%
+      group_by(!!sym(input$drug_filter)) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+      rename(DrugCategory = !!sym(input$drug_filter))
+    plot_ly(drug_data,
+            x = ~reorder(DrugCategory, Total), y = ~Total,
+            type = 'bar', marker = list(color = 'darkred'))
+  })
+  
+  output$drug_type_pie <- renderPlotly({
+    drug_data <- crime_data$table06 %>%
+      group_by(`CSA Drug Type`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
+    plot_ly(drug_data, labels = ~`CSA Drug Type`, values = ~Total, type = 'pie')
+  })
+  
+  output$drug_category_bar <- renderPlotly({
+    drug_data <- crime_data$table06 %>%
+      group_by(`Offence Subdivision`) %>%
+      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
+    plot_ly(drug_data, y = ~reorder(`Offence Subdivision`, Total),
+            x = ~Total, type = 'bar', orientation = 'h')
+  })
+  
+  output$data_table <- renderDT({
+    selected_table <- crime_data[[input$table_select]]
+    datatable(selected_table, options = list(pageLength = 25, scrollX = TRUE))
+  })
+  
+  # --- Melbourne Crime Navigation Logic ---
+  observeEvent(input$nav_overview, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Overview"),
+        br(),
+        fluidRow(
+          valueBoxOutput("total_offences", width = 4),
+          valueBoxOutput("crime_rate", width = 4),
+          valueBoxOutput("police_region", width = 4)
+        ),
+        br(),
+        verbatimTextOutput("overview_summary")
+      )
+    })
+  })
+  
+  observeEvent(input$nav_categories, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Offence Categories"),
+        selectInput("category_level", "Category Level:",
+                    choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
+                    selected = "Offence Division"),
+        plotlyOutput("category_plot", height = 500),
+        fluidRow(
+          column(6, plotlyOutput("top_categories", height = 400)),
+          column(6, plotlyOutput("category_rate", height = 400))
+        )
+      )
+    })
+  })
+  
+  observeEvent(input$nav_suburbs, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Suburbs Analysis"),
+        selectInput("suburb_category", "Offence Category:",
+                    choices = c("All", unique(crime_data$table03$`Offence Division`)),
+                    selected = "All"),
+        plotlyOutput("suburb_plot", height = 500),
+        fluidRow(
+          column(6, plotlyOutput("top_suburbs", height = 400)),
+          column(6, plotlyOutput("postcode_plot", height = 400))
+        )
+      )
+    })
+  })
+  
+  observeEvent(input$nav_locations, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Location Types"),
+        selectInput("location_level", "Location Level:",
+                    choices = c("Location Division", "Location Subdivision", "Location Group"),
+                    selected = "Location Division"),
+        plotlyOutput("location_plot", height = 500),
+        plotlyOutput("location_sunburst", height = 600)
+      )
+    })
+  })
+  
+  observeEvent(input$nav_investigation, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Investigation Status"),
+        fluidRow(
+          column(6, plotlyOutput("investigation_pie", height = 400)),
+          column(6, plotlyOutput("investigation_bar", height = 400))
+        ),
+        DTOutput("investigation_table")
+      )
+    })
+  })
+  
+  observeEvent(input$nav_drugs, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Drug Offences"),
+        selectInput("drug_filter", "Drug Filter By:",
+                    choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
+                    selected = "CSA Drug Type"),
+        plotlyOutput("drug_plot", height = 500),
+        fluidRow(
+          column(6, plotlyOutput("drug_type_pie", height = 400)),
+          column(6, plotlyOutput("drug_category_bar", height = 400))
+        )
+      )
+    })
+  })
+  
+  observeEvent(input$nav_tables, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Data Tables"),
+        selectInput("table_select", "Choose Table:",
+                    choices = c("Table 01: Overview" = "table01",
+                                "Table 02: Offence Categories" = "table02",
+                                "Table 03: Suburbs" = "table03",
+                                "Table 04: Location Types" = "table04",
+                                "Table 05: Investigation" = "table05",
+                                "Table 06: Drug Offences" = "table06"),
+                    selected = "table01"),
+        DTOutput("data_table")
+      )
+    })
+  })
+  
+  # --- Default display (Overview when first opened) ---
+  output$crime_main_panel <- renderUI({
+    tagList(
+      h3("Overview"),
+      br(),
+      fluidRow(
+        column(4, valueBoxOutput("total_offences")),
+        column(4, valueBoxOutput("crime_rate")),
+        column(4, valueBoxOutput("police_region"))
+      ),
+      br(),
+      verbatimTextOutput("overview_summary")
     )
   })
   
