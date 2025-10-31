@@ -1172,11 +1172,15 @@ server <- function(input, output, session) {
           label = ~paste0("Zone ", zone_id),
           popup = ~popup_html,
           group = "All Parking Zones",
-          clusterOptions = markerClusterOptions()
+          clusterOptions = markerClusterOptions(
+            showCoverageOnHover = FALSE,
+            spiderfyOnMaxZoom = TRUE,
+            removeOutsideVisibleBounds = TRUE
+          )
         )
       }
 
-      # Add unmatched segments (orange markers with clustering)
+      # Add unmatched segments (orange markers)
       unmatched <- zones_display |> dplyr::filter(has_zone == FALSE)
       if (nrow(unmatched) > 0) {
         # Create popup for unmatched segments
@@ -1194,7 +1198,11 @@ server <- function(input, output, session) {
           label = ~"No Zone ID",
           popup = ~popup_html,
           group = "All Parking Zones",
-          clusterOptions = markerClusterOptions()
+          clusterOptions = markerClusterOptions(
+            showCoverageOnHover = FALSE,
+            spiderfyOnMaxZoom = TRUE,
+            removeOutsideVisibleBounds = TRUE
+          )
         )
       }
     }
@@ -1309,7 +1317,7 @@ server <- function(input, output, session) {
           unmatched_segs <- zones_sf |> dplyr::filter(has_zone == FALSE)
         }
 
-        # Add zones with zone IDs (red with clustering)
+        # Add zones with zone IDs (red markers)
         if (nrow(zones_with_ids) > 0) {
           zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
 
@@ -1325,7 +1333,11 @@ server <- function(input, output, session) {
             label = ~paste0("Zone ", zone_id),
             popup = ~popup_html,
             group = "Filtered Zones",
-            clusterOptions = markerClusterOptions()
+            clusterOptions = markerClusterOptions(
+              showCoverageOnHover = FALSE,
+              spiderfyOnMaxZoom = TRUE,
+              removeOutsideVisibleBounds = TRUE
+            )
           )
         }
 
@@ -1345,7 +1357,11 @@ server <- function(input, output, session) {
             label = ~"No Zone ID",
             popup = ~popup_html,
             group = "Filtered Zones",
-            clusterOptions = markerClusterOptions()
+            clusterOptions = markerClusterOptions(
+              showCoverageOnHover = FALSE,
+              spiderfyOnMaxZoom = TRUE,
+              removeOutsideVisibleBounds = TRUE
+            )
           )
         }
 
