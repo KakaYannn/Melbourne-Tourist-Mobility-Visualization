@@ -1769,7 +1769,7 @@ server <- function(input, output, session) {
       session,
       "lm_name_pt",
       choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
-      selected = character(0)
+      server = TRUE
     )
   })
 
@@ -2090,7 +2090,7 @@ server <- function(input, output, session) {
       session,
       "lm_name_pedestrian",
       choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
-      selected = character(0)
+      server = TRUE
     )
   })
 
@@ -2252,7 +2252,7 @@ server <- function(input, output, session) {
       session,
       "lm_name_parking",
       choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
-      selected = character(0)
+      server = TRUE
     )
   })
 
@@ -3070,7 +3070,7 @@ server <- function(input, output, session) {
       session,
       "lm_name_crime",
       choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
-      selected = character(0)
+      server = TRUE
     )
   })
   
