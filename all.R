@@ -2401,6 +2401,7 @@ server <- function(input, output, session) {
           color = "#666666",
           opacity = 0.7,
           dashArray = "5, 5",
+          options = pathOptions(zIndex = 100),  # Lower z-index so landmarks can be clicked
           highlight = highlightOptions(
             weight = 1.5,
             color = "#333",
@@ -2539,61 +2540,14 @@ server <- function(input, output, session) {
     }
     
     # Update map layers
+    # IMPORTANT: Add polygons FIRST, then landmarks LAST so landmarks are clickable
     leafletProxy("crime_map") %>%
       clearGroup("Crime Heatmap") %>%
       clearGroup("Crime Suburbs") %>%
       clearGroup("All Landmarks") %>%
       clearGroup("Filtered Landmarks") %>%
-      # Add filtered POI landmarks
       {
-        if (nrow(filtered_pois_to_add) > 0) {
-          filtered_pois_popup <- filtered_pois_to_add
-          filtered_pois_popup$popup_text <- paste0("<b>", filtered_pois_popup$name, "</b><br>Category: ", filtered_pois_popup$subtype)
-          
-          if (has_landmark_filter) {
-            addCircleMarkers(
-              .,
-              data = filtered_pois_popup,
-              lng = ~lon, lat = ~lat,
-              radius = landmark_radius,
-              stroke = landmark_stroke,
-              weight = landmark_weight,
-              fillOpacity = landmark_fill_opacity,
-              fillColor = landmark_fill_color,
-              color = landmark_color,
-              label = ~name,
-              popup = ~popup_text,
-              layerId = ~name,
-              group = landmark_group,
-              options = markerOptions(zIndexOffset = 1000)  # Put markers on top
-            ) %>%
-            hideGroup("All Landmarks") %>%
-            showGroup("Filtered Landmarks")
-          } else {
-            addCircleMarkers(
-              .,
-              data = filtered_pois_popup,
-              lng = ~lon, lat = ~lat,
-              radius = landmark_radius,
-              stroke = landmark_stroke,
-              fill = TRUE,
-              fillColor = ~colour,
-              fillOpacity = landmark_fill_opacity,
-              label = ~name,
-              popup = ~popup_text,
-              layerId = ~name,
-              group = landmark_group,
-              options = markerOptions(zIndexOffset = 1000)  # Put markers on top
-            ) %>%
-            showGroup("All Landmarks") %>%
-            hideGroup("Filtered Landmarks")
-          }
-        } else {
-          .
-        }
-      } %>%
-      {
-        # Add suburb polygons
+        # Add suburb polygons FIRST
         if (nrow(crime_suburbs) > 0) {
           addPolygons(
             .,
@@ -2605,6 +2559,7 @@ server <- function(input, output, session) {
             color = "#666666",
             opacity = 0.7,
             dashArray = "5, 5",
+            options = pathOptions(zIndex = 100),  # Lower z-index so landmarks can be clicked
             highlight = highlightOptions(
               weight = 1.5,
               color = "#333",
@@ -2646,6 +2601,54 @@ server <- function(input, output, session) {
         } else {
           .
         }
+      } %>%
+      {
+        # Add POI landmarks LAST so they're on top and clickable
+        if (nrow(filtered_pois_to_add) > 0) {
+          filtered_pois_popup <- filtered_pois_to_add
+          filtered_pois_popup$popup_text <- paste0("<b>", filtered_pois_popup$name, "</b><br>Category: ", filtered_pois_popup$subtype)
+
+          if (has_landmark_filter) {
+            addCircleMarkers(
+              .,
+              data = filtered_pois_popup,
+              lng = ~lon, lat = ~lat,
+              radius = landmark_radius,
+              stroke = landmark_stroke,
+              weight = landmark_weight,
+              fillOpacity = landmark_fill_opacity,
+              fillColor = landmark_fill_color,
+              color = landmark_color,
+              label = ~name,
+              popup = ~popup_text,
+              layerId = ~name,
+              group = landmark_group,
+              options = markerOptions(zIndexOffset = 1000)  # Put markers on top
+            ) %>%
+            hideGroup("All Landmarks") %>%
+            showGroup("Filtered Landmarks")
+          } else {
+            addCircleMarkers(
+              .,
+              data = filtered_pois_popup,
+              lng = ~lon, lat = ~lat,
+              radius = landmark_radius,
+              stroke = landmark_stroke,
+              fill = TRUE,
+              fillColor = ~colour,
+              fillOpacity = landmark_fill_opacity,
+              label = ~name,
+              popup = ~popup_text,
+              layerId = ~name,
+              group = landmark_group,
+              options = markerOptions(zIndexOffset = 1000)  # Put markers on top
+            ) %>%
+            showGroup("All Landmarks") %>%
+            hideGroup("Filtered Landmarks")
+          }
+        } else {
+          .
+        }
       }
     }
 
@@ -2676,7 +2679,7 @@ server <- function(input, output, session) {
     lm <- filtered_pois_crime()
     if (nrow(lm) == 0) return(lm)
     
-    if (length(input$lm_name_crime) > 0) {
+    if (!is.null(input$lm_name_crime) && length(input$lm_name_crime) > 0) {
       lm <- lm |> dplyr::filter(name %in% input$lm_name_crime)
     }
     lm
@@ -2691,7 +2694,9 @@ server <- function(input, output, session) {
     map <- clearGroup(map, "Filtered Landmarks")
     
     # If landmarks are selected, show filtered ones, otherwise show all
-    if (length(input$lm_name_crime) > 0) {
+    # Handle NULL and empty character vectors
+    has_filter_in_type <- !is.null(input$lm_name_crime) && length(input$lm_name_crime) > 0
+    if (has_filter_in_type) {
       sel_lm <- selected_landmarks_crime()
       if (nrow(sel_lm) > 0) {
         sel_lm_popup <- sel_lm
@@ -2699,6 +2704,7 @@ server <- function(input, output, session) {
         map <- addCircleMarkers(
           map,
           data = sel_lm_popup,
+          lng = ~lon, lat = ~lat,
           radius = 8,
           stroke = TRUE,
           weight = 2,
@@ -2708,7 +2714,8 @@ server <- function(input, output, session) {
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
-          group = "Filtered Landmarks"
+          group = "Filtered Landmarks",
+          options = markerOptions(zIndexOffset = 1000)  # Put markers on top
         )
         map <- hideGroup(map, "All Landmarks")
         map <- showGroup(map, "Filtered Landmarks")
@@ -2757,16 +2764,60 @@ server <- function(input, output, session) {
     }
   })
   
+  # Handle polygon clicks - check if there's a landmark nearby
+  observeEvent(input$crime_map_shape_click, {
+    click <- input$crime_map_shape_click
+    if (is.null(click) || is.null(click$lat) || is.null(click$lng)) return()
+    
+    # Get currently visible landmarks
+    current_landmarks <- if (!is.null(input$lm_name_crime) && length(input$lm_name_crime) > 0) {
+      selected_landmarks_crime()
+    } else {
+      filtered_pois_crime()
+    }
+    
+    if (nrow(current_landmarks) > 0) {
+      # Check if click is near any landmark (within 50 meters)
+      click_point <- st_sfc(st_point(c(click$lng, click$lat)), crs = 4326)
+      landmarks_sf <- st_as_sf(current_landmarks, coords = c("lon", "lat"), crs = 4326)
+      
+      # Transform to a metric CRS for accurate distance calculation
+      tryCatch({
+        click_proj <- st_transform(click_point, 3857)
+        landmarks_proj <- st_transform(landmarks_sf, 3857)
+        distances <- st_distance(click_proj, landmarks_proj)
+        min_dist <- min(distances)
+        min_idx <- which.min(distances)
+        
+        # If click is within 50 meters of a landmark, treat it as landmark click
+        if (min_dist < 50) {
+          clicked_landmark <- current_landmarks[min_idx, ]
+          if (!is.null(clicked_landmark$name)) {
+            # Update the landmark selection dropdown
+            updateSelectizeInput(
+              session,
+              "lm_name_crime",
+              selected = clicked_landmark$name
+            )
+          }
+        }
+      }, error = function(e) {
+        # If transformation fails, skip the check
+      })
+    }
+  })
+  
   # Update map layers when landmarks are selected
   observeEvent(input$lm_name_crime, {
     req(!is.null(pois))
+    # Force reactivity - trigger even when selection is cleared
     
     map <- leafletProxy("crime_map")
     map <- clearGroup(map, "Filtered Landmarks")
     map <- clearGroup(map, "All Landmarks")
     
-    # Check if user has filter active
-    has_filter <- length(input$lm_name_crime) > 0
+    # Check if user has filter active - handle NULL and empty character vectors
+    has_filter <- !is.null(input$lm_name_crime) && length(input$lm_name_crime) > 0
     
     if (has_filter) {
       # User applied filter - show selected landmarks
@@ -2829,8 +2880,8 @@ server <- function(input, output, session) {
         map <- hideGroup(map, "Filtered Landmarks")
       }
     }
-  })
-
+  }, ignoreNULL = FALSE)  # Trigger even when input becomes NULL/empty
+  
   # Update map when filters change
   observeEvent(input$crime_category_filter, {
     # Only update if we're on the Crime tab
