@@ -251,7 +251,6 @@ if (nrow(bays) > 0 && "roadsegmentid" %in% names(bays)) {
 }
 
 # load zone-based clustering datasets
-cat("Loading zone-to-segments mapping...\n")
 zones_to_segments <- tryCatch({
   readr::read_delim(URL_ZONES_TO_SEGMENTS, delim = ";", show_col_types = FALSE)
 }, error = function(e) {
@@ -259,7 +258,6 @@ zones_to_segments <- tryCatch({
   data.frame()
 })
 
-cat("Loading sign plates data...\n")
 sign_plates <- tryCatch({
   readr::read_delim(URL_SIGN_PLATES, delim = ";", show_col_types = FALSE)
 }, error = function(e) {
@@ -276,7 +274,6 @@ if (nrow(zones_to_segments) > 0) {
       segment_id = as.character(segment_id),
       zone_id = as.character(zone_id)
     )
-  cat("Loaded", nrow(zones_to_segments), "zone-to-segment mappings\n")
 }
 
 if (nrow(sign_plates) > 0) {
@@ -284,11 +281,9 @@ if (nrow(sign_plates) > 0) {
     norm_col(c("parkingzone", "parking_zone", "zone_id", "zoneid"), "zone_id") |>
     dplyr::mutate(zone_id = as.character(zone_id))
   # Don't rename restriction_display - keep original column names
-  cat("Loaded", nrow(sign_plates), "sign plate records\n")
 }
 
 # PHASE 2: AGGREGATE BAYS TO SEGMENTS
-cat("PHASE 2: Aggregating bays to road segments...\n")
 segment_locations <- NULL
 if (nrow(bays) > 0 && "roadsegmentid" %in% names(bays)) {
   segment_locations <- bays |>
@@ -300,12 +295,9 @@ if (nrow(bays) > 0 && "roadsegmentid" %in% names(bays)) {
     ) |>
     dplyr::rename(segment_id = roadsegmentid) |>
     sf::st_as_sf(sf_column_name = "segment_geometry")
-  
-  cat("Created", nrow(segment_locations), "segment centroids\n")
 }
 
 # PHASE 3: MAP SEGMENTS TO ZONES
-cat("PHASE 3: Mapping segments to parking zones...\n")
 zone_locations <- NULL
 if (!is.null(segment_locations) && nrow(segment_locations) > 0 && nrow(zones_to_segments) > 0) {
   # Join segments to zones
@@ -313,9 +305,7 @@ if (!is.null(segment_locations) && nrow(segment_locations) > 0 && nrow(zones_to_
     dplyr::select(segment_id, num_bays) |>
     dplyr::left_join(zones_to_segments, by = "segment_id", relationship = "many-to-many") |>
     dplyr::filter(!is.na(zone_id))
-  
-  cat("Matched", nrow(segment_zone_map), "segment-zone pairs\n")
-  
+
   # Re-attach geometry and aggregate by zone
   zone_locations <- segment_zone_map |>
     dplyr::left_join(
@@ -330,12 +320,9 @@ if (!is.null(segment_locations) && nrow(segment_locations) > 0 && nrow(zones_to_
       .groups = "drop"
     ) |>
     sf::st_as_sf(sf_column_name = "zone_geometry")
-  
-  cat("Created", nrow(zone_locations), "zone locations\n")
 }
 
 # PHASE 3.5: HANDLE UNMATCHED SEGMENTS (segments with no zone)
-cat("PHASE 3.5: Processing unmatched segments (no zone data)...\n")
 unmatched_segments <- NULL
 if (!is.null(segment_locations) && nrow(segment_locations) > 0) {
   # Find segments that don't have zone mappings
@@ -356,12 +343,9 @@ if (!is.null(segment_locations) && nrow(segment_locations) > 0) {
     ) |>
     dplyr::rename(zone_geometry = segment_geometry) |>
     sf::st_as_sf(sf_column_name = "zone_geometry")
-  
-  cat("Found", nrow(unmatched_segments), "unmatched segments (no zone data)\n")
 }
 
 # PHASE 4: PREPARE SIGN PLATES DATA FOR TABLE DISPLAY
-cat("PHASE 4: Preparing restriction data for table display...\n")
 
 # Function to create HTML table popup for a zone
 create_zone_popup_table <- function(zone_id_val, sign_data, lat = NULL, lon = NULL) {
@@ -473,12 +457,9 @@ if (!is.null(zone_locations) && nrow(zone_locations) > 0) {
   # Just add has_zone marker, keep geometry
   zones_display <- zone_locations |>
     dplyr::mutate(has_zone = TRUE)
-  
-  cat("Prepared", nrow(zones_display), "zones for display with table popups\n")
 }
 
 # PHASE 4.5: COMBINE ZONES AND UNMATCHED SEGMENTS
-cat("PHASE 4.5: Combining zones with unmatched segments...\n")
 if (!is.null(unmatched_segments) && nrow(unmatched_segments) > 0) {
   # Add has_zone marker to unmatched segments
   unmatched_segments <- unmatched_segments |>
@@ -488,11 +469,9 @@ if (!is.null(unmatched_segments) && nrow(unmatched_segments) > 0) {
   if (!is.null(zones_display) && nrow(zones_display) > 0) {
     # Ensure both have same columns
     zones_display <- dplyr::bind_rows(zones_display, unmatched_segments)
-    cat("Combined:", nrow(zones_display), "total markers (zones + unmatched segments)\n")
   } else {
     # If no zones_display, just use unmatched segments
     zones_display <- unmatched_segments
-    cat("No zones found, using", nrow(zones_display), "unmatched segments only\n")
   }
 }
 
@@ -548,8 +527,7 @@ load_suburb_boundaries <- function() {
   if (requireNamespace("osmdata", quietly = TRUE)) {
     tryCatch({
       library(osmdata, quietly = TRUE)
-      cat('[PREPROCESS] Fetching suburb boundaries from OpenStreetMap (via osmdata)...\n')
-      
+
       # Get Melbourne bounding box (larger area to capture all suburbs)
       bbox_melb <- getbb("Melbourne, Australia", featuretype = "city")
       if (is.null(bbox_melb) || nrow(bbox_melb) == 0) {
@@ -559,8 +537,7 @@ load_suburb_boundaries <- function() {
       }
       
       # Query all suburbs in Melbourne area - need ADMINISTRATIVE boundaries, not just place tags
-      cat('[PREPROCESS] Querying OpenStreetMap for suburb administrative boundaries...\n')
-      
+
       # Try query for administrative boundaries (admin_level 10 = suburb/neighborhood level)
       q <- opq(bbox = bbox_melb) %>%
         add_osm_feature(key = "admin_level", value = "10") %>%
@@ -578,12 +555,10 @@ load_suburb_boundaries <- function() {
           select(name) %>%
           rename(suburb_name = name) %>%
           st_transform(4326)
-        cat('[PREPROCESS]   Found', nrow(suburbs_all), 'multipolygon boundaries\n')
       } 
       
       # If no admin boundaries, try place=suburb but filter for polygons only
       if (is.null(suburbs_all) || nrow(suburbs_all) == 0) {
-        cat('[PREPROCESS]   Admin boundaries not found, trying place=suburb with polygon filter...\n')
         q2 <- opq(bbox = bbox_melb) %>%
           add_osm_feature(key = "place", value = "suburb")
         
@@ -595,14 +570,12 @@ load_suburb_boundaries <- function() {
             select(name) %>%
             rename(suburb_name = name) %>%
             st_transform(4326)
-          cat('[PREPROCESS]   Found', nrow(suburbs_all), 'multipolygon suburbs\n')
         } else if (!is.null(osm_data2$osm_polygons) && nrow(osm_data2$osm_polygons) > 0) {
           suburbs_all <- osm_data2$osm_polygons %>%
             filter(!is.na(name)) %>%
             select(name) %>%
             rename(suburb_name = name) %>%
             st_transform(4326)
-          cat('[PREPROCESS]   Found', nrow(suburbs_all), 'polygon suburbs\n')
         }
       }
       
@@ -610,11 +583,7 @@ load_suburb_boundaries <- function() {
         # Verify these are actually polygons, not points
         geom_types <- st_geometry_type(suburbs_all$geometry)
         polygon_count <- sum(geom_types %in% c("POLYGON", "MULTIPOLYGON"))
-        cat('[PREPROCESS] ✓ Loaded', nrow(suburbs_all), 'features from OpenStreetMap\n')
-        cat('[PREPROCESS]   Polygon/Multipolygon features:', polygon_count, '\n')
-        cat('[PREPROCESS]   Found suburbs:', paste(head(suburbs_all$suburb_name, 5), collapse=", "), 
-            if(nrow(suburbs_all) > 5) "...", '\n')
-        
+
         # Filter to only polygon geometries (exclude any points/lines that got through)
         if (polygon_count > 0) {
           suburbs_all <- suburbs_all[geom_types %in% c("POLYGON", "MULTIPOLYGON"), ]
@@ -622,14 +591,12 @@ load_suburb_boundaries <- function() {
         }
       }
     }, error = function(e) {
-      cat('[PREPROCESS] ✗ OpenStreetMap query failed:', conditionMessage(e), '\n')
-      cat('[PREPROCESS]   Will try alternative sources...\n')
+      # OpenStreetMap query failed, will try alternative sources
     })
   }
   
   # Option 2: Try direct download from data.gov.au (Victorian government official data)
   tryCatch({
-    cat('[PREPROCESS] Attempting to load suburb boundaries from data.gov.au API...\n')
     url_vic_suburbs <- "https://data.gov.au/geoserver/vic-suburb-locality-boundaries/wfs?request=GetFeature&typeName=vic-suburb-locality-boundaries:ckan_vic_suburb_locality_boundaries_psma_additional&outputFormat=application%2Fjson&srsName=EPSG:4326"
     suburbs_all <- st_read(url_vic_suburbs, quiet = TRUE)
     
@@ -649,21 +616,17 @@ load_suburb_boundaries <- function() {
           select(suburb_name, geometry)
       }
       suburbs_all <- suburbs_all %>% st_transform(4326)
-      cat('[PREPROCESS] ✓ Loaded', nrow(suburbs_all), 'suburb boundaries from data.gov.au API\n')
       return(suburbs_all)
     }
   }, error = function(e) {
-    cat('[PREPROCESS] ✗ data.gov.au API failed:', conditionMessage(e), '\n')
+    # data.gov.au API failed
   })
   
   # Option 3: Use local geojson file (fallback only if OpenStreetMap and API both failed)
   # Note: This file may have outdated boundaries - OpenStreetMap is preferred
   if (file.exists('vic_suburbs.geojson')) {
-    cat('[PREPROCESS] WARNING: Using local vic_suburbs.geojson file (may have outdated boundaries)\n')
-    cat('[PREPROCESS]          Consider deleting this file to force OpenStreetMap usage\n')
     suburbs_all <- st_read('vic_suburbs.geojson', quiet = TRUE) %>%
       st_transform(4326)
-    cat('[PREPROCESS] ✓ Loaded suburb boundaries from local file\n')
     return(suburbs_all)
   }
   
@@ -742,12 +705,7 @@ melbourne_suburbs_raw <- suburbs_all %>%
     TRUE ~ suburb_name
   ))
 
-cat('[PREPROCESS] Matched', nrow(melbourne_suburbs_raw), 'suburb boundaries:', paste(unique(melbourne_suburbs_raw$suburb_name), collapse=", "), '\n')
-
 # Ensure both are in the same CRS
-cat('[PREPROCESS] Checking CRS compatibility...\n')
-cat('[PREPROCESS] Boundary CRS:', st_crs(boundary)$input, '\n')
-cat('[PREPROCESS] Suburbs CRS:', st_crs(melbourne_suburbs_raw)$input, '\n')
 
 # Transform both to a common CRS (WGS84/4326) for reliable intersection
 boundary_for_clip <- st_transform(boundary, 4326)
@@ -756,12 +714,7 @@ melbourne_suburbs_raw <- melbourne_suburbs_raw %>%
   mutate(geometry = suppressWarnings(st_make_valid(geometry))) %>%
   filter(!st_is_empty(geometry))
 
-cat('[PREPROCESS] Both transformed to WGS84 (EPSG:4326)\n')
-
 # Clip suburbs to city boundary with improved gap handling
-cat('[PREPROCESS] Starting suburb clipping with improved gap handling...\n')
-
-cat('[PREPROCESS] Processing', nrow(melbourne_suburbs_raw), 'suburbs individually to avoid intersection artifacts...\n')
 
 # Clip each suburb individually to avoid intersection artifacts that cause misassignment
 melbourne_suburbs_list <- list()
@@ -772,14 +725,12 @@ for (i in seq_len(nrow(melbourne_suburbs_raw))) {
   tryCatch({
     # First check if suburb intersects with boundary at all
     if (!st_intersects(suburb$geometry, boundary_for_clip, sparse = FALSE)[1, 1]) {
-      cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- does not intersect boundary\n')
       next
     }
     
     # Verify suburb is actually a polygon before clipping
     suburb_geom_type <- as.character(st_geometry_type(suburb$geometry[[1]]))
     if (!suburb_geom_type %in% c("POLYGON", "MULTIPOLYGON")) {
-      cat('[PREPROCESS]   ✗ Skipped', suburb$suburb_name, '- not a polygon (type:', suburb_geom_type, ')\n')
       next
     }
     
@@ -794,7 +745,6 @@ for (i in seq_len(nrow(melbourne_suburbs_raw))) {
     
     # Check if we got a valid geometry result
     if (st_is_empty(clipped_geom)) {
-      cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- intersection is empty\n')
       next
     }
     
@@ -812,9 +762,6 @@ for (i in seq_len(nrow(melbourne_suburbs_raw))) {
       if (nrow(clipped) > 0 && !st_is_empty(clipped$geometry[[1]])) {
         melbourne_suburbs_list[[success_count + 1]] <- clipped
         success_count <- success_count + 1
-        cat('[PREPROCESS]   ✓ Clipped:', suburb$suburb_name, '\n')
-      } else {
-        cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- became empty after validation\n')
       }
     } else {
       # Intersection returned non-polygon - suburb might be completely within or on edge
@@ -824,21 +771,15 @@ for (i in seq_len(nrow(melbourne_suburbs_raw))) {
           mutate(geometry = suppressWarnings(st_make_valid(geometry))) %>%
           filter(!st_is_empty(geometry))
         success_count <- success_count + 1
-        cat('[PREPROCESS]   ✓ Using full suburb (within boundary):', suburb$suburb_name, '\n')
-      } else {
-        cat('[PREPROCESS]   ✗ Skipped', suburb$suburb_name, '- intersection returned:', geom_type_str, '(expected polygon)\n')
       }
     }
   }, error = function(e) {
-    cat('[PREPROCESS]   ✗ Error clipping', suburb$suburb_name, ':', conditionMessage(e), '\n')
+    # Error clipping suburb
   })
 }
 
-cat('[PREPROCESS] Successfully clipped', success_count, 'out of', nrow(melbourne_suburbs_raw), 'suburbs\n')
-
 # Combine all successfully clipped suburbs
 if (length(melbourne_suburbs_list) > 0) {
-  cat('[PREPROCESS] Combining and cleaning suburb geometries...\n')
   melbourne_suburbs <- bind_rows(melbourne_suburbs_list) %>%
     select(suburb_name, geometry) %>%
     st_as_sf() %>%
@@ -849,12 +790,8 @@ if (length(melbourne_suburbs_list) > 0) {
     group_by(suburb_name) %>%
     summarise(geometry = st_union(geometry), .groups = 'drop') %>%
     st_make_valid()
-  
-  cat('[PREPROCESS] Resolving overlaps between suburbs to prevent misassignment...\n')
-  cat('[PREPROCESS] Priority: Specific suburbs keep their boundaries; Melbourne gets remaining areas\n')
-  
+
   # First, detect if there are actually any overlaps
-  cat('[PREPROCESS] Detecting overlaps between suburbs...\n')
   n_suburbs <- nrow(melbourne_suburbs)
   overlap_detected <- FALSE
   overlap_details <- list()
@@ -897,22 +834,14 @@ if (length(melbourne_suburbs_list) > 0) {
               
               if (!is.na(overlap_area) && overlap_area > 0.000001) {  # Very small threshold to ignore tiny overlaps
                 overlap_detected <- TRUE
-                overlap_info <- paste0(suburb1$suburb_name, ' <-> ', suburb2$suburb_name, 
+                overlap_info <- paste0(suburb1$suburb_name, ' <-> ', suburb2$suburb_name,
                                       ' (area: ', format(overlap_area, scientific = FALSE), ')')
                 overlap_details[[length(overlap_details) + 1]] <- overlap_info
-                cat('[PREPROCESS]   ⚠ OVERLAP DETECTED:', overlap_info, '\n')
               }
             }
           }
         }
       }
-    }
-    
-    if (!overlap_detected) {
-      cat('[PREPROCESS]   ✓ No overlaps detected between suburbs\n')
-      cat('[PREPROCESS]   Note: If you see misclassification, it may be due to data accuracy, not overlaps\n')
-    } else {
-      cat('[PREPROCESS]   Found', length(overlap_details), 'overlapping pairs - will resolve with priority logic\n')
     }
   }
   
@@ -934,7 +863,6 @@ if (length(melbourne_suburbs_list) > 0) {
     
     # Step 1: Keep all specific suburbs as-is (they have priority)
     if (nrow(other_suburbs_list) > 0) {
-      cat('[PREPROCESS]   Keeping', nrow(other_suburbs_list), 'specific suburbs with full boundaries...\n')
       for (i in seq_len(nrow(other_suburbs_list))) {
         suburb <- other_suburbs_list[i, ]
         # Check for overlaps between specific suburbs only
@@ -952,14 +880,11 @@ if (length(melbourne_suburbs_list) > 0) {
               inherits(corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
             suburb$geometry <- corrected_geom
             corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
-            cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept (priority suburb)\n')
           } else {
             corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
-            cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept (no overlaps with other specific suburbs)\n')
           }
         } else {
           corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
-          cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept\n')
         }
       }
     }
@@ -1010,12 +935,6 @@ if (length(melbourne_suburbs_list) > 0) {
               }, error = function(e) 0)
             }
           }
-          
-          cat('[PREPROCESS]   Melbourne overlaps with specific suburbs - overlap area:', 
-              format(overlap_area, scientific = FALSE), '\n')
-          cat('[PREPROCESS]   Melbourne original area:', format(melbourne_original_area, scientific = FALSE), '\n')
-        } else {
-          cat('[PREPROCESS]   Melbourne does not overlap with specific suburbs\n')
         }
         
         # Melbourne only gets areas NOT claimed by specific suburbs
@@ -1028,27 +947,16 @@ if (length(melbourne_suburbs_list) > 0) {
           as.numeric(st_area(melbourne_corrected_geom))
         }, error = function(e) 0)
         
-        if (!st_is_empty(melbourne_corrected_geom) && 
+        if (!st_is_empty(melbourne_corrected_geom) &&
             inherits(melbourne_corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
-          area_reduction <- melbourne_original_area - melbourne_new_area
-          cat('[PREPROCESS]   Melbourne new area:', format(melbourne_new_area, scientific = FALSE), '\n')
-          if (area_reduction > 0.000001) {
-            cat('[PREPROCESS]   Area reduced by:', format(area_reduction, scientific = FALSE), 
-                '(', round(100 * area_reduction / melbourne_original_area, 2), '%)\n')
-          } else {
-            cat('[PREPROCESS]   No significant area change (Melbourne did not overlap significantly)\n')
-          }
           melbourne_sub$geometry <- melbourne_corrected_geom
           corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
-          cat('[PREPROCESS]   ✓ Melbourne - assigned only non-overlapping areas (yielded to specific suburbs)\n')
         } else {
-          cat('[PREPROCESS]   ⚠ Warning: Melbourne has no unique areas after yielding to other suburbs\n')
           corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
         }
       } else {
         # No other suburbs, keep Melbourne as-is
         corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
-        cat('[PREPROCESS]   ✓ Melbourne - kept (no other suburbs)\n')
       }
     }
     
@@ -1058,19 +966,12 @@ if (length(melbourne_suburbs_list) > 0) {
         st_make_valid() %>%
         filter(!st_is_empty(geometry)) %>%
         distinct(suburb_name, .keep_all = TRUE)
-      
-      cat('[PREPROCESS] ✓ Overlap resolution complete:', nrow(melbourne_suburbs), 'suburbs remain\n')
     }
   } else {
     melbourne_suburbs <- melbourne_suburbs %>%
       distinct(suburb_name, .keep_all = TRUE)
   }
-  
-  cat('[PREPROCESS] ✓ Final result:', nrow(melbourne_suburbs), 'unique suburbs (no overlaps, gaps preserved)\n')
 } else {
-  cat('[PREPROCESS] WARNING: Individual clipping failed for all suburbs\n')
-  cat('[PREPROCESS] Attempting fallback: using suburbs as-is if within boundary...\n')
-  
   # Fallback: use suburbs that are within boundary, clip those that overlap
   melbourne_suburbs_list_fallback <- list()
   
@@ -1085,18 +986,16 @@ if (length(melbourne_suburbs_list) > 0) {
     if (is_within) {
       # Use suburb as-is
       melbourne_suburbs_list_fallback[[length(melbourne_suburbs_list_fallback) + 1]] <- suburb
-      cat('[PREPROCESS]   ✓ Using', suburb$suburb_name, '(within boundary)\n')
-    } else {
+    } else{
       # Try to clip using st_crop or st_intersection with different approach
       tryCatch({
         # Use st_filter with st_within predicate
         clipped <- st_filter(suburb, boundary_for_clip, .predicate = st_within)
         if (nrow(clipped) > 0 && !st_is_empty(clipped$geometry[[1]])) {
           melbourne_suburbs_list_fallback[[length(melbourne_suburbs_list_fallback) + 1]] <- clipped
-          cat('[PREPROCESS]   ✓ Filtered', suburb$suburb_name, '\n')
         }
       }, error = function(e) {
-        cat('[PREPROCESS]   ✗ Could not process', suburb$suburb_name, '\n')
+        # Could not process suburb
       })
     }
   }
@@ -1111,12 +1010,8 @@ if (length(melbourne_suburbs_list) > 0) {
       st_make_valid() %>%
       filter(!st_is_empty(geometry)) %>%
       distinct(suburb_name, .keep_all = TRUE)
-    
-    cat('[PREPROCESS] ✓ Fallback result:', nrow(melbourne_suburbs), 'suburbs\n')
-    
+
     # Apply overlap resolution to fallback results too (with priority logic)
-    cat('[PREPROCESS] Applying overlap resolution to fallback results...\n')
-    cat('[PREPROCESS] Priority: Specific suburbs keep boundaries; Melbourne yields\n')
     n_suburbs <- nrow(melbourne_suburbs)
     if (n_suburbs > 1) {
       # Same priority logic: specific suburbs first, Melbourne last
@@ -1175,23 +1070,12 @@ if (length(melbourne_suburbs_list) > 0) {
           distinct(suburb_name, .keep_all = TRUE)
       }
     }
-    cat('[PREPROCESS] ✓ Overlap resolution applied to fallback (priority-based)\n')
   } else {
     # Last resort: use raw suburbs without clipping
-    cat('[PREPROCESS] ERROR: All methods failed, using unclipped suburbs (may extend beyond boundary)\n')
     melbourne_suburbs <- melbourne_suburbs_raw %>%
       distinct(suburb_name, .keep_all = TRUE)
   }
 }
-
-cat('[PREPROCESS] ============================================\n')
-cat('[PREPROCESS] SUBURB PREPROCESSING COMPLETE\n')
-cat('[PREPROCESS] Total suburbs for mapping:', nrow(melbourne_suburbs), '\n')
-cat('[PREPROCESS] Suburbs:', paste(melbourne_suburbs$suburb_name, collapse=", "), '\n')
-cat('[PREPROCESS] Overlap resolution:', if(nrow(melbourne_suburbs) > 1) 'APPLIED' else 'N/A', '\n')
-cat('[PREPROCESS] ============================================\n')
-
-
 
 # --- UI ---
 ui <- navbarPage(
