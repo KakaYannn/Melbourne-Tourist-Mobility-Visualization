@@ -1081,8 +1081,74 @@ if (length(melbourne_suburbs_list) > 0) {
 ui <- navbarPage(
   id = 'mypage', 
   title = '',
-  
-  
+  theme = bslib::bs_theme(
+    version = 4,
+    bootswatch = "flatly",
+    base_font = bslib::font_google("Inter", local = FALSE),
+    heading_font = bslib::font_google("Inter", local = FALSE),
+    primary = "#2c3e50",
+    secondary = "#95a5a6",
+    success = "#27ae60",
+    info = "#3498db",
+    warning = "#f39c12",
+    danger = "#e74c3c"
+  ),
+  header = tags$head(
+    tags$style(HTML("
+      * {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+      }
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      h1, h2, h3, h4, h5, h6 {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        font-weight: 600;
+      }
+      .well {
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      .nav-tabs {
+        border-bottom: 2px solid #dee2e6;
+      }
+      .nav-tabs > li > a {
+        border-radius: 4px 4px 0 0;
+        margin-right: 2px;
+      }
+      .leaflet-container {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+      }
+      .irs-grid-text, .leaflet-control {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+      }
+      .sidebar-panel {
+        padding: 15px;
+      }
+      .main-panel {
+        padding: 15px;
+      }
+      .well {
+        padding: 15px;
+        background-color: #ffffff;
+      }
+      selectInput, selectizeInput {
+        width: 100%;
+      }
+      .navbar {
+        min-height: 50px;
+        border-bottom: 2px solid #dee2e6;
+      }
+      .tab-content {
+        padding: 15px 0;
+      }
+    "))
+  ),
   
   # --- PT Tab ---
   tabPanel(
@@ -1110,20 +1176,19 @@ ui <- navbarPage(
         sliderInput(
           inputId = 'radius',
           label = 'Search Radius (Metres): ',
-          min = 0,
-          max = 2000,
-          value = 500,
+          min = 100,
+          max = 1000,
+          value = 300,
           step = 50,
-          ticks = FALSE
+          ticks = TRUE
         ),
         width = 3,
         style = 'max-width: 400px'
       ), 
       mainPanel(
-        fluidRow(
-          column(8, leafletOutput('mappt', width = 800, height = 800)), 
-          column(4, uiOutput('infopt'))
-        )
+        leafletOutput('mappt', width = "100%", height = 600),
+        br(),
+        uiOutput('infopt')
       )
     )
   ), 
@@ -1162,24 +1227,29 @@ ui <- navbarPage(
           step = 50,
           ticks = TRUE
         ),
-        hr(),
-        h5("View Mode:"),
-        tabsetPanel(id = "view_mode",
-                    tabPanel("Heatmap View", value = "heatmap"),
-                    tabPanel("Ranking View", value = "ranking"),
-                    tabPanel("Trend View", value = "trend")),   # ✅ New tab
         width = 3,
         style = 'max-width: 400px'
       ),
       mainPanel(
-        conditionalPanel("input.view_mode == 'heatmap'",
-                         leafletOutput("heatmap", width = 800, height = 800)
-        ),
-        conditionalPanel("input.view_mode == 'ranking'",
-                         plotlyOutput("popularity_plot", width = 1400, height = 800)
-        ),
-        conditionalPanel("input.view_mode == 'trend'",
-                         plotlyOutput("trend_plot", width = 1400, height = 800)  # ✅ Time trend
+        tabsetPanel(
+          id = "view_mode",
+          type = "tabs",
+          selected = "heatmap",
+          tabPanel(
+            "Heatmap View",
+            value = "heatmap",
+            leafletOutput("heatmap", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Ranking View",
+            value = "ranking",
+            plotlyOutput("popularity_plot", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Trend View",
+            value = "trend",
+            plotlyOutput("trend_plot", width = "100%", height = 600)
+          )
         )
       )
     )
@@ -1261,7 +1331,7 @@ ui <- navbarPage(
         style = 'max-width: 400px'
       ),
       mainPanel(
-        leafletOutput("map_parking", width = 800, height = 800),
+        leafletOutput("map_parking", width = "100%", height = 600),
         br(),
         uiOutput("info_summary_parking"),
         # JavaScript handlers for layer control checkbox manipulation
@@ -1311,28 +1381,18 @@ ui <- navbarPage(
   # --- Crime Tab ---
   tabPanel(
     "Melbourne Crime",
-    fluidPage(
-      titlePanel("Melbourne Crime Statistics - Year Ending June 2025"),
-      fluidRow(
-        column(
-          width = 3,
+    sidebarLayout(
+      sidebarPanel(
+        width = 3,
               wellPanel(
-                h4("Map Filters"),
-                selectInput("crime_category_filter", "Crime Category:",
-                           choices = c("All Offences" = "all",
-                                      "Crimes Against Person" = "person",
-                                      "Property & Deception" = "property",
-                                      "Drug Offences" = "drug",
-                                      "Public Order" = "public"),
-                           selected = "all"),
-                hr(),
-                h4("Landmark Filters"),
                 selectInput(
                   inputId = 'type_crime',
                   label = 'POI Type',
                   choices = c('All', unique(pois$subtype)),
                   selected = 'All'
                 ),
+                h4("Select Landmarks to Filter Crime Map"),
+                helpText("Choose one or more landmarks to filter and explore crime data around specific locations"),
                 selectizeInput(
                   "lm_name_crime",
                   "Landmark(s)",
@@ -1342,7 +1402,15 @@ ui <- navbarPage(
                     plugins = list('remove_button')
                   ),
                   multiple = TRUE
-                )
+                ),
+                hr(),
+                selectInput("crime_category_filter", "Crime Category:",
+                           choices = c("All Offences" = "all",
+                                      "Crimes Against Person" = "person",
+                                      "Property & Deception" = "property",
+                                      "Drug Offences" = "drug",
+                                      "Public Order" = "public"),
+                           selected = "all")
               ),
           # Hidden links for tooltip redirects (not visible to users)
           tags$div(
@@ -1351,17 +1419,18 @@ ui <- navbarPage(
             actionLink("nav_suburbs", ""),
             actionLink("nav_tables", ""),
             actionLink("nav_locations", "")
-          )
-        ),
-        column(
-          width = 9,
-          tabsetPanel(
+          ),
+        style = 'max-width: 400px'
+      ),
+      mainPanel(
+        tabsetPanel(
             id = "crime_tabs",
             type = "tabs",
             selected = "crime_map_tab",
             tabPanel(
               "Overview",
               value = "overview_tab",
+              h2("Melbourne Crime Statistics - Year Ending June 2025"),
               br(),
               fluidRow(
                 column(4, uiOutput("total_offences")),
@@ -1370,7 +1439,7 @@ ui <- navbarPage(
               ),
               br(),
               h4("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
-              plotlyOutput("location_sunburst", height = 600)
+              plotlyOutput("location_sunburst", width = "100%", height = 600)
             ),
             tabPanel(
               "Crime Map",
@@ -1384,10 +1453,11 @@ ui <- navbarPage(
               value = "investigation_tab",
               br(),
               fluidRow(
-                column(6, plotlyOutput("investigation_pie", height = 400)),
-                column(6, plotlyOutput("investigation_bar", height = 400))
+                column(6, plotlyOutput("investigation_pie", width = "100%", height = 400)),
+                column(6, plotlyOutput("investigation_bar", width = "100%", height = 400))
               ),
-              DTOutput("investigation_table")
+              br(),
+              DTOutput("investigation_table", width = "100%")
             ),
             tabPanel(
               "Drug Offences",
@@ -1396,7 +1466,8 @@ ui <- navbarPage(
               selectInput("drug_filter", "Drug Filter By:",
                           choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
                           selected = "CSA Drug Type"),
-              plotlyOutput("drug_plot", height = 500)
+              br(),
+              plotlyOutput("drug_plot", width = "100%", height = 600)
             )
           ),
           # Hidden panels for tooltip navigation (not visible as tabs)
@@ -1414,9 +1485,6 @@ ui <- navbarPage(
       )
     )
   )
-)
-
-
 
 # --- Server ---
 server <- function(input, output, session) {
@@ -1458,7 +1526,7 @@ server <- function(input, output, session) {
                        stroke = FALSE, 
                        fill = TRUE, 
                        fillColor = ~colour, 
-                       fillOpacity = 1, 
+                       fillOpacity = 0.5, 
                        label = ~name, 
                        layerId = ~id, 
                        group = 'pois')
@@ -1827,6 +1895,13 @@ server <- function(input, output, session) {
       map <- hideGroup(map, "Filtered Stops")
       map <- hideGroup(map, "Filtered Stations")
       map <- showGroup(map, "pois")
+      
+      # Zoom out to show boundary
+      if (nrow(boundary) > 0) {
+        bounds <- sf::st_bbox(boundary)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
+      }
     }
   })
 
@@ -1862,7 +1937,7 @@ server <- function(input, output, session) {
         stroke = FALSE, 
         fill = TRUE, 
         fillColor = ~colour, 
-        fillOpacity = 1, 
+        fillOpacity = 0.5, 
         label = lapply(paste0(
           "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
           "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
@@ -1912,8 +1987,9 @@ server <- function(input, output, session) {
       coord_flip() +
       labs(x = "Point of Interest", y = "Avg Pedestrian Count (nearest sensor)",
            title = "Top 15 POIs by Nearby Pedestrian Volume") +
-      theme_minimal(base_size = 14) +
-      theme(legend.position = "bottom") + 
+      theme_minimal(base_size = 12) +
+      theme(legend.position = "bottom",
+            plot.title = element_text(size = 14, face = "bold")) + 
       scale_fill_manual(values = colourvals, name = 'Type')
     
     ggplotly(p, tooltip = c("x", "y", "fill"))
@@ -2113,6 +2189,13 @@ server <- function(input, output, session) {
       map <- hideGroup(map, "Filtered Landmarks")
       map <- hideGroup(map, "Filtered Sensors")
       map <- showGroup(map, "Landmarks")
+      
+      # Zoom out to show boundary
+      if (nrow(boundary) > 0) {
+        bounds <- sf::st_bbox(boundary)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
+      }
     }
   })
 
@@ -2219,7 +2302,7 @@ server <- function(input, output, session) {
         data = filtered_pois,
         radius = 7,
         stroke = FALSE,
-        fillOpacity = 1,
+        fillOpacity = 0.5,
         fillColor = ~colour,
         label = ~name,
         layerId = ~id,
@@ -2471,6 +2554,18 @@ server <- function(input, output, session) {
 
       # Send JavaScript command to re-check the checkboxes
       session$sendCustomMessage(type = "recheckLayers", message = list())
+      
+      # Zoom out to show boundary (same as initial map)
+      if (nrow(boundary) > 0) {
+        bb <- sf::st_bbox(boundary)
+        map <- fitBounds(map,
+                         lng1 = as.numeric(bb["xmin"]),
+                         lat1 = as.numeric(bb["ymin"]),
+                         lng2 = as.numeric(bb["xmax"]),
+                         lat2 = as.numeric(bb["ymax"]))
+      } else {
+        map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
+      }
     }
   })
 
@@ -2731,7 +2826,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 1,
+          fillOpacity = 0.5,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -2813,7 +2908,7 @@ server <- function(input, output, session) {
       landmark_radius <- 7
       landmark_stroke <- FALSE
       landmark_weight <- NULL
-      landmark_fill_opacity <- 1
+      landmark_fill_opacity <- 0.5
       landmark_color <- NULL
     }
     
@@ -3003,6 +3098,11 @@ server <- function(input, output, session) {
         )
         map <- hideGroup(map, "All Landmarks")
         map <- showGroup(map, "Filtered Landmarks")
+        
+        # Automatically pan and zoom to the selected landmarks
+        bounds <- sf::st_bbox(sel_lm)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
       }
     } else {
       # No filter - show all landmarks of the selected type
@@ -3017,7 +3117,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 1,
+          fillOpacity = 0.5,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3027,6 +3127,9 @@ server <- function(input, output, session) {
         map <- showGroup(map, "All Landmarks")
         map <- hideGroup(map, "Filtered Landmarks")
       }
+      
+      # Zoom out to default view (same as initial map)
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
     }
   })
   
@@ -3153,7 +3256,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 1,
+          fillOpacity = 0.5,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3163,6 +3266,9 @@ server <- function(input, output, session) {
         map <- showGroup(map, "All Landmarks")
         map <- hideGroup(map, "Filtered Landmarks")
       }
+      
+      # Zoom out to default view (same as initial map)
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
     }
   }, ignoreNULL = FALSE)  # Trigger even when input becomes NULL/empty
   
