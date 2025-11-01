@@ -21,7 +21,6 @@ library(bslib)
 library(readr)
 library(scales)
 library(DT)
-library(shinydashboard)
 
 
 
@@ -502,31 +501,31 @@ if (!is.null(unmatched_segments) && nrow(unmatched_segments) > 0) {
 # Load and preprocess data
 load_data <- function() {
   file_path <- "Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx"
-  
+
   # Table 01: Overall offence counts by LGA
   table01 <- read_excel(file_path, sheet = "Table 01") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   # Table 02: Offences by category (Division, Subdivision, Subgroup)
   table02 <- read_excel(file_path, sheet = "Table 02") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   # Table 03: Offences by suburb/postcode
   table03 <- read_excel(file_path, sheet = "Table 03") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   # Table 04: Offences by location type
   table04 <- read_excel(file_path, sheet = "Table 04") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   # Table 05: Investigation status
   table05 <- read_excel(file_path, sheet = "Table 05") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   # Table 06: Drug offences
   table06 <- read_excel(file_path, sheet = "Table 06") %>%
     filter(`Local Government Area` == "Melbourne")
-  
+
   list(
     table01 = table01,
     table02 = table02,
@@ -539,6 +538,656 @@ load_data <- function() {
 
 # Load data
 crime_data <- load_data()
+
+# Load suburb boundaries for crime visualization
+# Use OpenStreetMap data via osmdata package for accurate boundaries
+load_suburb_boundaries <- function() {
+  # Option 1: Try OpenStreetMap via osmdata package (most accurate, free, widely available)
+  if (requireNamespace("osmdata", quietly = TRUE)) {
+    tryCatch({
+      library(osmdata, quietly = TRUE)
+      cat('[PREPROCESS] Fetching suburb boundaries from OpenStreetMap (via osmdata)...\n')
+      
+      # Get Melbourne bounding box (larger area to capture all suburbs)
+      bbox_melb <- getbb("Melbourne, Australia", featuretype = "city")
+      if (is.null(bbox_melb) || nrow(bbox_melb) == 0) {
+        # Fallback bbox if geocoding fails
+        bbox_melb <- matrix(c(144.93, -37.84, 144.98, -37.79), nrow = 2, 
+                            dimnames = list(c("x", "y"), c("min", "max")))
+      }
+      
+      # Query all suburbs in Melbourne area - need ADMINISTRATIVE boundaries, not just place tags
+      cat('[PREPROCESS] Querying OpenStreetMap for suburb administrative boundaries...\n')
+      
+      # Try query for administrative boundaries (admin_level 10 = suburb/neighborhood level)
+      q <- opq(bbox = bbox_melb) %>%
+        add_osm_feature(key = "admin_level", value = "10") %>%
+        add_osm_feature(key = "boundary", value = "administrative")
+      
+      osm_data <- osmdata_sf(q)
+      
+      suburbs_all <- NULL
+      
+      # Extract polygons (prefer multipolygons, fall back to polygons)
+      # These are actual boundary polygons, not point centroids
+      if (!is.null(osm_data$osm_multipolygons) && nrow(osm_data$osm_multipolygons) > 0) {
+        suburbs_all <- osm_data$osm_multipolygons %>%
+          filter(!is.na(name)) %>%
+          select(name) %>%
+          rename(suburb_name = name) %>%
+          st_transform(4326)
+        cat('[PREPROCESS]   Found', nrow(suburbs_all), 'multipolygon boundaries\n')
+      } 
+      
+      # If no admin boundaries, try place=suburb but filter for polygons only
+      if (is.null(suburbs_all) || nrow(suburbs_all) == 0) {
+        cat('[PREPROCESS]   Admin boundaries not found, trying place=suburb with polygon filter...\n')
+        q2 <- opq(bbox = bbox_melb) %>%
+          add_osm_feature(key = "place", value = "suburb")
+        
+        osm_data2 <- osmdata_sf(q2)
+        
+        if (!is.null(osm_data2$osm_multipolygons) && nrow(osm_data2$osm_multipolygons) > 0) {
+          suburbs_all <- osm_data2$osm_multipolygons %>%
+            filter(!is.na(name)) %>%
+            select(name) %>%
+            rename(suburb_name = name) %>%
+            st_transform(4326)
+          cat('[PREPROCESS]   Found', nrow(suburbs_all), 'multipolygon suburbs\n')
+        } else if (!is.null(osm_data2$osm_polygons) && nrow(osm_data2$osm_polygons) > 0) {
+          suburbs_all <- osm_data2$osm_polygons %>%
+            filter(!is.na(name)) %>%
+            select(name) %>%
+            rename(suburb_name = name) %>%
+            st_transform(4326)
+          cat('[PREPROCESS]   Found', nrow(suburbs_all), 'polygon suburbs\n')
+        }
+      }
+      
+      if (!is.null(suburbs_all) && nrow(suburbs_all) > 0) {
+        # Verify these are actually polygons, not points
+        geom_types <- st_geometry_type(suburbs_all$geometry)
+        polygon_count <- sum(geom_types %in% c("POLYGON", "MULTIPOLYGON"))
+        cat('[PREPROCESS] ✓ Loaded', nrow(suburbs_all), 'features from OpenStreetMap\n')
+        cat('[PREPROCESS]   Polygon/Multipolygon features:', polygon_count, '\n')
+        cat('[PREPROCESS]   Found suburbs:', paste(head(suburbs_all$suburb_name, 5), collapse=", "), 
+            if(nrow(suburbs_all) > 5) "...", '\n')
+        
+        # Filter to only polygon geometries (exclude any points/lines that got through)
+        if (polygon_count > 0) {
+          suburbs_all <- suburbs_all[geom_types %in% c("POLYGON", "MULTIPOLYGON"), ]
+          return(suburbs_all)
+        }
+      }
+    }, error = function(e) {
+      cat('[PREPROCESS] ✗ OpenStreetMap query failed:', conditionMessage(e), '\n')
+      cat('[PREPROCESS]   Will try alternative sources...\n')
+    })
+  }
+  
+  # Option 2: Try direct download from data.gov.au (Victorian government official data)
+  tryCatch({
+    cat('[PREPROCESS] Attempting to load suburb boundaries from data.gov.au API...\n')
+    url_vic_suburbs <- "https://data.gov.au/geoserver/vic-suburb-locality-boundaries/wfs?request=GetFeature&typeName=vic-suburb-locality-boundaries:ckan_vic_suburb_locality_boundaries_psma_additional&outputFormat=application%2Fjson&srsName=EPSG:4326"
+    suburbs_all <- st_read(url_vic_suburbs, quiet = TRUE)
+    
+    if (nrow(suburbs_all) > 0) {
+      # Normalize column names
+      if ("vic_loca_2" %in% names(suburbs_all)) {
+        suburbs_all <- suburbs_all %>%
+          rename(suburb_name = vic_loca_2) %>%
+          select(suburb_name, geometry)
+      } else if ("vic_locality_name" %in% names(suburbs_all)) {
+        suburbs_all <- suburbs_all %>%
+          rename(suburb_name = vic_locality_name) %>%
+          select(suburb_name, geometry)
+      } else if ("name" %in% names(suburbs_all)) {
+        suburbs_all <- suburbs_all %>%
+          rename(suburb_name = name) %>%
+          select(suburb_name, geometry)
+      }
+      suburbs_all <- suburbs_all %>% st_transform(4326)
+      cat('[PREPROCESS] ✓ Loaded', nrow(suburbs_all), 'suburb boundaries from data.gov.au API\n')
+      return(suburbs_all)
+    }
+  }, error = function(e) {
+    cat('[PREPROCESS] ✗ data.gov.au API failed:', conditionMessage(e), '\n')
+  })
+  
+  # Option 3: Use local geojson file (fallback only if OpenStreetMap and API both failed)
+  # Note: This file may have outdated boundaries - OpenStreetMap is preferred
+  if (file.exists('vic_suburbs.geojson')) {
+    cat('[PREPROCESS] WARNING: Using local vic_suburbs.geojson file (may have outdated boundaries)\n')
+    cat('[PREPROCESS]          Consider deleting this file to force OpenStreetMap usage\n')
+    suburbs_all <- st_read('vic_suburbs.geojson', quiet = TRUE) %>%
+      st_transform(4326)
+    cat('[PREPROCESS] ✓ Loaded suburb boundaries from local file\n')
+    return(suburbs_all)
+  }
+  
+  stop("No suburb boundary data source available.\n",
+       "Please install osmdata package for accurate boundaries:\n",
+       "  install.packages('osmdata')\n",
+       "Or download boundaries from:\n",
+       "  https://discover.data.vic.gov.au/dataset/vic-suburb-locality-boundaries")
+}
+
+# Load suburb boundaries
+suburbs_all <- load_suburb_boundaries()
+
+# Filter to Melbourne LGA suburbs (ALL suburbs from crime data)
+# Normalize suburb names for matching - be flexible with name variations
+melbourne_suburb_names <- c('MELBOURNE', 'SOUTHBANK', 'DOCKLANDS', 'CARLTON',
+                           'CARLTON NORTH', 'NORTH MELBOURNE', 'WEST MELBOURNE',
+                           'EAST MELBOURNE', 'PARKVILLE', 'KENSINGTON',
+                           'PORT MELBOURNE', 'SOUTH WHARF', 'SOUTH YARRA',
+                           'FLEMINGTON')
+
+# Create flexible matching function that handles name variations
+match_suburb_name <- function(name, targets) {
+  name_upper <- toupper(name)
+  # Direct match
+  if (name_upper %in% targets) return(TRUE)
+  # Partial match (handles "Melbourne", "Melbourne CBD", etc.)
+  for (target in targets) {
+    if (grepl(paste0("^", target, "$|^", target, " | ", target, "$| ", target, " "), name_upper, ignore.case = TRUE)) {
+      return(TRUE)
+    }
+  }
+  # Handle special cases
+  if (grepl("^MELBOURNE", name_upper) && "MELBOURNE" %in% targets) return(TRUE)
+  if (grepl("SOUTHBANK", name_upper) && "SOUTHBANK" %in% targets) return(TRUE)
+  return(FALSE)
+}
+
+# Try to match suburbs - handle different column names with flexible matching
+if ("suburb_name" %in% names(suburbs_all)) {
+  name_col <- "suburb_name"
+} else if ("vic_loca_2" %in% names(suburbs_all)) {
+  name_col <- "vic_loca_2"
+} else if ("name" %in% names(suburbs_all)) {
+  name_col <- "name"
+} else {
+  # Last resort: use first column
+  name_col <- names(suburbs_all)[1]
+}
+
+# Apply flexible matching
+melbourne_suburbs_raw <- suburbs_all %>%
+  mutate(
+    name_upper = toupper(.data[[name_col]]),
+    matches = sapply(.data[[name_col]], function(x) match_suburb_name(x, melbourne_suburb_names))
+  ) %>%
+  filter(matches) %>%
+  rename(suburb_name = .data[[name_col]]) %>%
+  select(suburb_name, geometry) %>%
+  # Normalize suburb names to match crime data
+  mutate(suburb_name = case_when(
+    grepl("^MELBOURNE", toupper(suburb_name)) ~ "Melbourne",
+    toupper(suburb_name) == "SOUTHBANK" ~ "Southbank",
+    toupper(suburb_name) == "DOCKLANDS" ~ "Docklands",
+    toupper(suburb_name) == "CARLTON" ~ "Carlton",
+    toupper(suburb_name) == "CARLTON NORTH" | grepl("CARLTON.*NORTH", toupper(suburb_name)) ~ "Carlton North",
+    toupper(suburb_name) == "NORTH MELBOURNE" | grepl("NORTH.*MELBOURNE", toupper(suburb_name)) ~ "North Melbourne",
+    toupper(suburb_name) == "WEST MELBOURNE" | grepl("WEST.*MELBOURNE", toupper(suburb_name)) ~ "West Melbourne",
+    toupper(suburb_name) == "EAST MELBOURNE" | grepl("EAST.*MELBOURNE", toupper(suburb_name)) ~ "East Melbourne",
+    toupper(suburb_name) == "PARKVILLE" ~ "Parkville",
+    toupper(suburb_name) == "KENSINGTON" ~ "Kensington",
+    toupper(suburb_name) == "PORT MELBOURNE" | grepl("PORT.*MELBOURNE", toupper(suburb_name)) ~ "Port Melbourne",
+    toupper(suburb_name) == "SOUTH WHARF" | grepl("SOUTH.*WHARF", toupper(suburb_name)) ~ "South Wharf",
+    toupper(suburb_name) == "SOUTH YARRA" | grepl("SOUTH.*YARRA", toupper(suburb_name)) ~ "South Yarra",
+    toupper(suburb_name) == "FLEMINGTON" ~ "Flemington",
+    TRUE ~ suburb_name
+  ))
+
+cat('[PREPROCESS] Matched', nrow(melbourne_suburbs_raw), 'suburb boundaries:', paste(unique(melbourne_suburbs_raw$suburb_name), collapse=", "), '\n')
+
+# Ensure both are in the same CRS
+cat('[PREPROCESS] Checking CRS compatibility...\n')
+cat('[PREPROCESS] Boundary CRS:', st_crs(boundary)$input, '\n')
+cat('[PREPROCESS] Suburbs CRS:', st_crs(melbourne_suburbs_raw)$input, '\n')
+
+# Transform both to a common CRS (WGS84/4326) for reliable intersection
+boundary_for_clip <- st_transform(boundary, 4326)
+melbourne_suburbs_raw <- melbourne_suburbs_raw %>%
+  st_transform(4326) %>%
+  mutate(geometry = suppressWarnings(st_make_valid(geometry))) %>%
+  filter(!st_is_empty(geometry))
+
+cat('[PREPROCESS] Both transformed to WGS84 (EPSG:4326)\n')
+
+# Clip suburbs to city boundary with improved gap handling
+cat('[PREPROCESS] Starting suburb clipping with improved gap handling...\n')
+
+cat('[PREPROCESS] Processing', nrow(melbourne_suburbs_raw), 'suburbs individually to avoid intersection artifacts...\n')
+
+# Clip each suburb individually to avoid intersection artifacts that cause misassignment
+melbourne_suburbs_list <- list()
+success_count <- 0
+
+for (i in seq_len(nrow(melbourne_suburbs_raw))) {
+  suburb <- melbourne_suburbs_raw[i, ]
+  tryCatch({
+    # First check if suburb intersects with boundary at all
+    if (!st_intersects(suburb$geometry, boundary_for_clip, sparse = FALSE)[1, 1]) {
+      cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- does not intersect boundary\n')
+      next
+    }
+    
+    # Verify suburb is actually a polygon before clipping
+    suburb_geom_type <- as.character(st_geometry_type(suburb$geometry[[1]]))
+    if (!suburb_geom_type %in% c("POLYGON", "MULTIPOLYGON")) {
+      cat('[PREPROCESS]   ✗ Skipped', suburb$suburb_name, '- not a polygon (type:', suburb_geom_type, ')\n')
+      next
+    }
+    
+    # Clip this specific suburb to boundary using geometry-level intersection
+    suburb_geom <- st_geometry(suburb) %>% st_make_valid()
+    boundary_geom <- st_geometry(boundary_for_clip) %>% st_make_valid()
+    
+    # Perform intersection at geometry level for better control
+    clipped_geom <- suppressWarnings(
+      st_intersection(suburb_geom, boundary_geom)
+    ) %>% st_make_valid()
+    
+    # Check if we got a valid geometry result
+    if (st_is_empty(clipped_geom)) {
+      cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- intersection is empty\n')
+      next
+    }
+    
+    # Check the actual geometry type using st_geometry_type
+    geom_type_str <- as.character(st_geometry_type(clipped_geom))
+    
+    # Check if it's a polygon-type geometry
+    if (geom_type_str %in% c("POLYGON", "MULTIPOLYGON")) {
+      # Create sf object with clipped geometry
+      clipped <- suburb %>%
+        st_set_geometry(clipped_geom) %>%
+        mutate(geometry = suppressWarnings(st_make_valid(geometry))) %>%
+        filter(!st_is_empty(geometry))
+      
+      if (nrow(clipped) > 0 && !st_is_empty(clipped$geometry[[1]])) {
+        melbourne_suburbs_list[[success_count + 1]] <- clipped
+        success_count <- success_count + 1
+        cat('[PREPROCESS]   ✓ Clipped:', suburb$suburb_name, '\n')
+      } else {
+        cat('[PREPROCESS]   ⚠ Skipped', suburb$suburb_name, '- became empty after validation\n')
+      }
+    } else {
+      # Intersection returned non-polygon - suburb might be completely within or on edge
+      if (st_within(suburb$geometry, boundary_for_clip, sparse = FALSE)[1, 1]) {
+        # Suburb is completely within boundary, use it as-is
+        melbourne_suburbs_list[[success_count + 1]] <- suburb %>%
+          mutate(geometry = suppressWarnings(st_make_valid(geometry))) %>%
+          filter(!st_is_empty(geometry))
+        success_count <- success_count + 1
+        cat('[PREPROCESS]   ✓ Using full suburb (within boundary):', suburb$suburb_name, '\n')
+      } else {
+        cat('[PREPROCESS]   ✗ Skipped', suburb$suburb_name, '- intersection returned:', geom_type_str, '(expected polygon)\n')
+      }
+    }
+  }, error = function(e) {
+    cat('[PREPROCESS]   ✗ Error clipping', suburb$suburb_name, ':', conditionMessage(e), '\n')
+  })
+}
+
+cat('[PREPROCESS] Successfully clipped', success_count, 'out of', nrow(melbourne_suburbs_raw), 'suburbs\n')
+
+# Combine all successfully clipped suburbs
+if (length(melbourne_suburbs_list) > 0) {
+  cat('[PREPROCESS] Combining and cleaning suburb geometries...\n')
+  melbourne_suburbs <- bind_rows(melbourne_suburbs_list) %>%
+    select(suburb_name, geometry) %>%
+    st_as_sf() %>%
+    st_make_valid()
+  
+  # Group by suburb name and union any fragmented pieces
+  melbourne_suburbs <- melbourne_suburbs %>%
+    group_by(suburb_name) %>%
+    summarise(geometry = st_union(geometry), .groups = 'drop') %>%
+    st_make_valid()
+  
+  cat('[PREPROCESS] Resolving overlaps between suburbs to prevent misassignment...\n')
+  cat('[PREPROCESS] Priority: Specific suburbs keep their boundaries; Melbourne gets remaining areas\n')
+  
+  # First, detect if there are actually any overlaps
+  cat('[PREPROCESS] Detecting overlaps between suburbs...\n')
+  n_suburbs <- nrow(melbourne_suburbs)
+  overlap_detected <- FALSE
+  overlap_details <- list()
+  
+  if (n_suburbs > 1) {
+    for (i in seq_len(n_suburbs - 1)) {
+      for (j in (i + 1):n_suburbs) {
+        suburb1 <- melbourne_suburbs[i, ]
+        suburb2 <- melbourne_suburbs[j, ]
+        
+        # Check if they overlap (not just touch)
+        intersects <- tryCatch({
+          result <- st_intersects(suburb1$geometry, suburb2$geometry, sparse = FALSE)[1, 1]
+          ifelse(is.na(result), FALSE, result)
+        }, error = function(e) FALSE)
+        
+        if (intersects) {
+          # Calculate overlap area
+          overlap_geom <- tryCatch({
+            suppressWarnings(st_intersection(suburb1$geometry, suburb2$geometry))
+          }, error = function(e) NULL)
+          
+          if (!is.null(overlap_geom)) {
+            # Check if empty with proper NA handling
+            is_empty <- tryCatch({
+              result <- st_is_empty(overlap_geom)
+              if (length(result) == 0) {
+                TRUE
+              } else if (is.na(result)) {
+                TRUE
+              } else {
+                as.logical(result)
+              }
+            }, error = function(e) TRUE)
+            
+            if (length(is_empty) > 0 && !is_empty) {
+              overlap_area <- tryCatch({
+                as.numeric(st_area(overlap_geom))
+              }, error = function(e) 0)
+              
+              if (!is.na(overlap_area) && overlap_area > 0.000001) {  # Very small threshold to ignore tiny overlaps
+                overlap_detected <- TRUE
+                overlap_info <- paste0(suburb1$suburb_name, ' <-> ', suburb2$suburb_name, 
+                                      ' (area: ', format(overlap_area, scientific = FALSE), ')')
+                overlap_details[[length(overlap_details) + 1]] <- overlap_info
+                cat('[PREPROCESS]   ⚠ OVERLAP DETECTED:', overlap_info, '\n')
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    if (!overlap_detected) {
+      cat('[PREPROCESS]   ✓ No overlaps detected between suburbs\n')
+      cat('[PREPROCESS]   Note: If you see misclassification, it may be due to data accuracy, not overlaps\n')
+    } else {
+      cat('[PREPROCESS]   Found', length(overlap_details), 'overlapping pairs - will resolve with priority logic\n')
+    }
+  }
+  
+  # Priority-based overlap resolution:
+  # 1. Specific suburbs (e.g., South Yarra, Carlton) keep their full boundaries
+  # 2. "Melbourne" (central/general area) only gets areas NOT claimed by other suburbs
+  # This prevents areas near specific suburbs from being incorrectly classified as "Melbourne"
+  
+  if (n_suburbs > 1) {
+    # Identify "Melbourne" as the central area that should yield to others
+    melbourne_central <- melbourne_suburbs %>%
+      filter(toupper(suburb_name) == "MELBOURNE")
+    
+    # All other suburbs (specific suburbs) - these keep their boundaries
+    other_suburbs_list <- melbourne_suburbs %>%
+      filter(toupper(suburb_name) != "MELBOURNE")
+    
+    corrected_suburbs <- list()
+    
+    # Step 1: Keep all specific suburbs as-is (they have priority)
+    if (nrow(other_suburbs_list) > 0) {
+      cat('[PREPROCESS]   Keeping', nrow(other_suburbs_list), 'specific suburbs with full boundaries...\n')
+      for (i in seq_len(nrow(other_suburbs_list))) {
+        suburb <- other_suburbs_list[i, ]
+        # Check for overlaps between specific suburbs only
+        other_specific <- other_suburbs_list[-i, ]
+        if (nrow(other_specific) > 0) {
+          other_union <- suppressWarnings(
+            st_union(other_specific$geometry) %>% st_make_valid()
+          )
+          # Remove overlaps only with other specific suburbs
+          corrected_geom <- suppressWarnings(
+            st_difference(suburb$geometry, other_union)
+          ) %>% st_make_valid()
+          
+          if (!st_is_empty(corrected_geom) && 
+              inherits(corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
+            suburb$geometry <- corrected_geom
+            corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
+            cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept (priority suburb)\n')
+          } else {
+            corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
+            cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept (no overlaps with other specific suburbs)\n')
+          }
+        } else {
+          corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
+          cat('[PREPROCESS]   ✓', suburb$suburb_name, '- kept\n')
+        }
+      }
+    }
+    
+    # Step 2: Process "Melbourne" last - remove all areas claimed by specific suburbs
+    if (nrow(melbourne_central) > 0) {
+      melbourne_sub <- melbourne_central[1, ]
+      # Calculate original area for comparison
+      melbourne_original_area <- tryCatch({
+        as.numeric(st_area(melbourne_sub$geometry))
+      }, error = function(e) 0)
+      
+      # Union all specific suburbs that have been processed
+      if (length(corrected_suburbs) > 0) {
+        specific_union <- bind_rows(corrected_suburbs) %>%
+          st_as_sf() %>%
+          st_union() %>%
+          st_make_valid()
+        
+        # Check if Melbourne intersects with specific suburbs
+        melbourne_intersects_specific <- tryCatch({
+          st_intersects(melbourne_sub$geometry, specific_union, sparse = FALSE)[1, 1]
+        }, error = function(e) FALSE)
+        
+        if (melbourne_intersects_specific) {
+          # Calculate overlap area
+          overlap_geom <- tryCatch({
+            suppressWarnings(st_intersection(melbourne_sub$geometry, specific_union))
+          }, error = function(e) NULL)
+          
+          overlap_area <- 0
+          if (!is.null(overlap_geom)) {
+            is_empty <- tryCatch({
+              result <- st_is_empty(overlap_geom)
+              if (length(result) == 0) {
+                TRUE
+              } else if (is.na(result)) {
+                TRUE
+              } else {
+                as.logical(result)
+              }
+            }, error = function(e) TRUE)
+            
+            if (length(is_empty) > 0 && !is_empty) {
+              overlap_area <- tryCatch({
+                result <- as.numeric(st_area(overlap_geom))
+                ifelse(is.na(result), 0, result)
+              }, error = function(e) 0)
+            }
+          }
+          
+          cat('[PREPROCESS]   Melbourne overlaps with specific suburbs - overlap area:', 
+              format(overlap_area, scientific = FALSE), '\n')
+          cat('[PREPROCESS]   Melbourne original area:', format(melbourne_original_area, scientific = FALSE), '\n')
+        } else {
+          cat('[PREPROCESS]   Melbourne does not overlap with specific suburbs\n')
+        }
+        
+        # Melbourne only gets areas NOT claimed by specific suburbs
+        melbourne_corrected_geom <- suppressWarnings(
+          st_difference(melbourne_sub$geometry, specific_union)
+        ) %>% st_make_valid()
+        
+        # Calculate new area
+        melbourne_new_area <- tryCatch({
+          as.numeric(st_area(melbourne_corrected_geom))
+        }, error = function(e) 0)
+        
+        if (!st_is_empty(melbourne_corrected_geom) && 
+            inherits(melbourne_corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
+          area_reduction <- melbourne_original_area - melbourne_new_area
+          cat('[PREPROCESS]   Melbourne new area:', format(melbourne_new_area, scientific = FALSE), '\n')
+          if (area_reduction > 0.000001) {
+            cat('[PREPROCESS]   Area reduced by:', format(area_reduction, scientific = FALSE), 
+                '(', round(100 * area_reduction / melbourne_original_area, 2), '%)\n')
+          } else {
+            cat('[PREPROCESS]   No significant area change (Melbourne did not overlap significantly)\n')
+          }
+          melbourne_sub$geometry <- melbourne_corrected_geom
+          corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
+          cat('[PREPROCESS]   ✓ Melbourne - assigned only non-overlapping areas (yielded to specific suburbs)\n')
+        } else {
+          cat('[PREPROCESS]   ⚠ Warning: Melbourne has no unique areas after yielding to other suburbs\n')
+          corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
+        }
+      } else {
+        # No other suburbs, keep Melbourne as-is
+        corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
+        cat('[PREPROCESS]   ✓ Melbourne - kept (no other suburbs)\n')
+      }
+    }
+    
+    if (length(corrected_suburbs) > 0) {
+      melbourne_suburbs <- bind_rows(corrected_suburbs) %>%
+        st_as_sf() %>%
+        st_make_valid() %>%
+        filter(!st_is_empty(geometry)) %>%
+        distinct(suburb_name, .keep_all = TRUE)
+      
+      cat('[PREPROCESS] ✓ Overlap resolution complete:', nrow(melbourne_suburbs), 'suburbs remain\n')
+    }
+  } else {
+    melbourne_suburbs <- melbourne_suburbs %>%
+      distinct(suburb_name, .keep_all = TRUE)
+  }
+  
+  cat('[PREPROCESS] ✓ Final result:', nrow(melbourne_suburbs), 'unique suburbs (no overlaps, gaps preserved)\n')
+} else {
+  cat('[PREPROCESS] WARNING: Individual clipping failed for all suburbs\n')
+  cat('[PREPROCESS] Attempting fallback: using suburbs as-is if within boundary...\n')
+  
+  # Fallback: use suburbs that are within boundary, clip those that overlap
+  melbourne_suburbs_list_fallback <- list()
+  
+  for (i in seq_len(nrow(melbourne_suburbs_raw))) {
+    suburb <- melbourne_suburbs_raw[i, ]
+    
+    # Check if suburb is within boundary
+    is_within <- tryCatch({
+      st_within(suburb$geometry, boundary_for_clip, sparse = FALSE)[1, 1]
+    }, error = function(e) FALSE)
+    
+    if (is_within) {
+      # Use suburb as-is
+      melbourne_suburbs_list_fallback[[length(melbourne_suburbs_list_fallback) + 1]] <- suburb
+      cat('[PREPROCESS]   ✓ Using', suburb$suburb_name, '(within boundary)\n')
+    } else {
+      # Try to clip using st_crop or st_intersection with different approach
+      tryCatch({
+        # Use st_filter with st_within predicate
+        clipped <- st_filter(suburb, boundary_for_clip, .predicate = st_within)
+        if (nrow(clipped) > 0 && !st_is_empty(clipped$geometry[[1]])) {
+          melbourne_suburbs_list_fallback[[length(melbourne_suburbs_list_fallback) + 1]] <- clipped
+          cat('[PREPROCESS]   ✓ Filtered', suburb$suburb_name, '\n')
+        }
+      }, error = function(e) {
+        cat('[PREPROCESS]   ✗ Could not process', suburb$suburb_name, '\n')
+      })
+    }
+  }
+  
+  if (length(melbourne_suburbs_list_fallback) > 0) {
+    melbourne_suburbs <- bind_rows(melbourne_suburbs_list_fallback) %>%
+      select(suburb_name, geometry) %>%
+      st_as_sf() %>%
+      st_make_valid() %>%
+      group_by(suburb_name) %>%
+      summarise(geometry = st_union(geometry), .groups = 'drop') %>%
+      st_make_valid() %>%
+      filter(!st_is_empty(geometry)) %>%
+      distinct(suburb_name, .keep_all = TRUE)
+    
+    cat('[PREPROCESS] ✓ Fallback result:', nrow(melbourne_suburbs), 'suburbs\n')
+    
+    # Apply overlap resolution to fallback results too (with priority logic)
+    cat('[PREPROCESS] Applying overlap resolution to fallback results...\n')
+    cat('[PREPROCESS] Priority: Specific suburbs keep boundaries; Melbourne yields\n')
+    n_suburbs <- nrow(melbourne_suburbs)
+    if (n_suburbs > 1) {
+      # Same priority logic: specific suburbs first, Melbourne last
+      melbourne_central <- melbourne_suburbs %>%
+        filter(toupper(suburb_name) == "MELBOURNE")
+      other_suburbs_list <- melbourne_suburbs %>%
+        filter(toupper(suburb_name) != "MELBOURNE")
+      
+      corrected_suburbs <- list()
+      
+      # Process specific suburbs first (they have priority)
+      if (nrow(other_suburbs_list) > 0) {
+        for (i in seq_len(nrow(other_suburbs_list))) {
+          suburb <- other_suburbs_list[i, ]
+          other_specific <- other_suburbs_list[-i, ]
+          if (nrow(other_specific) > 0) {
+            other_union <- suppressWarnings(
+              st_union(other_specific$geometry) %>% st_make_valid()
+            )
+            corrected_geom <- suppressWarnings(
+              st_difference(suburb$geometry, other_union)
+            ) %>% st_make_valid()
+            if (!st_is_empty(corrected_geom) && 
+                inherits(corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
+              suburb$geometry <- corrected_geom
+            }
+          }
+          corrected_suburbs[[length(corrected_suburbs) + 1]] <- suburb
+        }
+      }
+      
+      # Process Melbourne last - remove areas claimed by specific suburbs
+      if (nrow(melbourne_central) > 0) {
+        melbourne_sub <- melbourne_central[1, ]
+        if (length(corrected_suburbs) > 0) {
+          specific_union <- bind_rows(corrected_suburbs) %>%
+            st_as_sf() %>%
+            st_union() %>%
+            st_make_valid()
+          melbourne_corrected_geom <- suppressWarnings(
+            st_difference(melbourne_sub$geometry, specific_union)
+          ) %>% st_make_valid()
+          if (!st_is_empty(melbourne_corrected_geom) && 
+              inherits(melbourne_corrected_geom[[1]], c("POLYGON", "MULTIPOLYGON"))) {
+            melbourne_sub$geometry <- melbourne_corrected_geom
+          }
+        }
+        corrected_suburbs[[length(corrected_suburbs) + 1]] <- melbourne_sub
+      }
+      
+      if (length(corrected_suburbs) > 0) {
+        melbourne_suburbs <- bind_rows(corrected_suburbs) %>%
+          st_as_sf() %>%
+          st_make_valid() %>%
+          filter(!st_is_empty(geometry)) %>%
+          distinct(suburb_name, .keep_all = TRUE)
+      }
+    }
+    cat('[PREPROCESS] ✓ Overlap resolution applied to fallback (priority-based)\n')
+  } else {
+    # Last resort: use raw suburbs without clipping
+    cat('[PREPROCESS] ERROR: All methods failed, using unclipped suburbs (may extend beyond boundary)\n')
+    melbourne_suburbs <- melbourne_suburbs_raw %>%
+      distinct(suburb_name, .keep_all = TRUE)
+  }
+}
+
+cat('[PREPROCESS] ============================================\n')
+cat('[PREPROCESS] SUBURB PREPROCESSING COMPLETE\n')
+cat('[PREPROCESS] Total suburbs for mapping:', nrow(melbourne_suburbs), '\n')
+cat('[PREPROCESS] Suburbs:', paste(melbourne_suburbs$suburb_name, collapse=", "), '\n')
+cat('[PREPROCESS] Overlap resolution:', if(nrow(melbourne_suburbs) > 1) 'APPLIED' else 'N/A', '\n')
+cat('[PREPROCESS] ============================================\n')
 
 
 
@@ -749,9 +1398,10 @@ ui <- navbarPage(
         column(
           width = 3,
           wellPanel(
-            h4("Sub-Tabs"),
+            h4("Views"),
             tags$ul(
               style = "list-style-type:none; padding-left:0;",
+              tags$li(actionLink("nav_crime_map", "Crime Map", style = "font-weight: bold; color: #0066cc;")),
               tags$li(actionLink("nav_overview", "Overview")),
               tags$li(actionLink("nav_categories", "Offence Categories")),
               tags$li(actionLink("nav_suburbs", "Suburbs Analysis")),
@@ -760,6 +1410,18 @@ ui <- navbarPage(
               tags$li(actionLink("nav_drugs", "Drug Offences")),
               tags$li(actionLink("nav_tables", "Data Tables"))
             )
+          ),
+          wellPanel(
+            h4("Map Filters"),
+            selectInput("crime_category_filter", "Crime Category:",
+                       choices = c("All Offences" = "all",
+                                  "Crimes Against Person" = "person",
+                                  "Property & Deception" = "property",
+                                  "Drug Offences" = "drug",
+                                  "Public Order" = "public"),
+                       selected = "all"),
+            sliderInput("crime_min_offences", "Minimum Offences:",
+                       min = 0, max = 1000, value = 0, step = 10)
           )
         ),
         column(
@@ -1521,24 +2183,477 @@ server <- function(input, output, session) {
   
   
   # --- Crime Visualisations ---
-  
-  # Overview
-  output$total_offences <- renderValueBox({
+
+  # Crime Map Active State
+  output$crime_map_active <- reactive({ TRUE })
+  outputOptions(output, "crime_map_active", suspendWhenHidden = FALSE)
+
+  # Crime Map Data (reactive) - suburb-based crime data with geometries
+  crime_suburb_data <- reactive({
+    # Get crime data by suburb with category breakdown
+    crime_summary <- crime_data$table03 %>%
+      group_by(`Suburb/Town Name`) %>%
+      summarise(
+        Total_Offences = sum(`Offence Count`, na.rm = TRUE),
+        Person_Crimes = sum(`Offence Count`[grepl("person", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Property_Crimes = sum(`Offence Count`[grepl("property|deception", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Drug_Crimes = sum(`Offence Count`[grepl("drug", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Public_Order = sum(`Offence Count`[grepl("public order|security|justice", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        .groups = 'drop'
+      )
+
+    # Apply category filter - default to "all" if NULL or not set
+    category_filter <- if (is.null(input$crime_category_filter)) "all" else input$crime_category_filter
+
+    if (category_filter != "all") {
+      crime_summary <- crime_summary %>%
+        mutate(
+          Display_Count = case_when(
+            category_filter == "person" ~ Person_Crimes,
+            category_filter == "property" ~ Property_Crimes,
+            category_filter == "drug" ~ Drug_Crimes,
+            category_filter == "public" ~ Public_Order,
+            TRUE ~ Total_Offences
+          )
+        )
+    } else {
+      crime_summary <- crime_summary %>%
+        mutate(Display_Count = Total_Offences)
+    }
+
+    # Filter by minimum offences - default to 0 if NULL
+    min_val <- if (is.null(input$crime_min_offences)) 0 else input$crime_min_offences
+    crime_summary <- crime_summary %>%
+      filter(Display_Count >= min_val)
+
+    # Join with suburb geometries
+    # Convert suburb names to uppercase to match the geometry data
+    crime_with_geo <- melbourne_suburbs %>%
+      mutate(suburb_match = toupper(`suburb_name`)) %>%
+      left_join(
+        crime_summary %>% mutate(suburb_match = toupper(`Suburb/Town Name`)),
+        by = "suburb_match"
+      ) %>%
+      filter(!is.na(Total_Offences)) %>%  # Only keep suburbs with crime data
+      select(suburb_name, `Suburb/Town Name`, Total_Offences, Person_Crimes,
+             Property_Crimes, Drug_Crimes, Public_Order, Display_Count, geometry)
+
+    crime_with_geo
+  })
+
+  # Crime Map Output - Base map (renders once)
+  output$crime_map <- renderLeaflet({
+    # Get initial crime data with default filters
+    isolate({
+      # Get crime data by suburb with category breakdown
+      crime_summary <- crime_data$table03 %>%
+        group_by(`Suburb/Town Name`) %>%
+        summarise(
+          Total_Offences = sum(`Offence Count`, na.rm = TRUE),
+          Person_Crimes = sum(`Offence Count`[grepl("person", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+          Property_Crimes = sum(`Offence Count`[grepl("property|deception", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+          Drug_Crimes = sum(`Offence Count`[grepl("drug", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+          Public_Order = sum(`Offence Count`[grepl("public order|security|justice", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+          .groups = 'drop'
+        )
+      
+      # Default to "all" category
+      category_filter <- "all"
+      crime_summary <- crime_summary %>%
+        mutate(Display_Count = Total_Offences)
+      
+      # Default minimum offences is 0
+      min_val <- 0
+      crime_summary <- crime_summary %>%
+        filter(Display_Count >= min_val)
+      
+      # Join with suburb geometries
+      crime_suburbs <- melbourne_suburbs %>%
+        mutate(suburb_match = toupper(`suburb_name`)) %>%
+        left_join(
+          crime_summary %>% mutate(suburb_match = toupper(`Suburb/Town Name`)),
+          by = "suburb_match"
+        ) %>%
+        filter(!is.na(Total_Offences)) %>%
+        select(suburb_name, `Suburb/Town Name`, Total_Offences, Person_Crimes,
+               Property_Crimes, Drug_Crimes, Public_Order, Display_Count, geometry)
+    })
+    
+    # Create color palette
+    pal <- NULL
+    if (nrow(crime_suburbs) > 0) {
+      pal <- colorNumeric(
+        palette = c("#FEF0D9", "#FDCC8A", "#FC8D59", "#E34A33", "#B30000"),
+        domain = crime_suburbs$Display_Count
+      )
+    }
+    
+    # Create a base map centered on Melbourne (same as other tabs)
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB) %>%
+      setView(lng = 144.9631, lat = -37.8136, zoom = 13) %>%
+      # Add boundary (same as other tabs)
+      addPolygons(data = boundary,
+                 color = 'black',
+                 weight = 3,
+                 fill = FALSE)
+    
+    # Add landmarks by default
+    if (nrow(pois) > 0) {
+      map <- map %>%
+        addCircleMarkers(
+          data = pois,
+          lng = ~lon, lat = ~lat,
+          radius = 7,
+          stroke = FALSE,
+          fill = TRUE,
+          fillColor = ~colour,
+          fillOpacity = 1,
+          label = ~name,
+          layerId = ~id,
+          group = 'Landmarks'
+        )
+    }
+    
+    # Add crime suburb polygons by default
+    if (nrow(crime_suburbs) > 0 && !is.null(pal)) {
+      map <- map %>%
+        addPolygons(
+          data = crime_suburbs,
+          fillColor = ~pal(Display_Count),
+          fillOpacity = 0.6,
+          stroke = TRUE,
+          weight = 2,
+          color = "#333333",
+          opacity = 1,
+          highlight = highlightOptions(
+            weight = 3,
+            color = "#666",
+            fillOpacity = 0.8,
+            bringToFront = TRUE
+          ),
+          label = lapply(paste0(
+            "<b>", crime_suburbs$suburb_name, "</b><br/>",
+            "<hr style='margin: 5px 0;'/>",
+            "<b>Showing:</b> All Offences<br/>",
+            "<b>Current Filter:</b> ", format(crime_suburbs$Display_Count, big.mark = ","), " offences<br/>",
+            "<hr style='margin: 5px 0;'/>",
+            "<b>Total Offences:</b> ", format(crime_suburbs$Total_Offences, big.mark = ","), "<br/>",
+            "<b>Person Crimes:</b> ", format(crime_suburbs$Person_Crimes, big.mark = ","), "<br/>",
+            "<b>Property Crimes:</b> ", format(crime_suburbs$Property_Crimes, big.mark = ","), "<br/>",
+            "<b>Drug Offences:</b> ", format(crime_suburbs$Drug_Crimes, big.mark = ","), "<br/>",
+            "<b>Public Order:</b> ", format(crime_suburbs$Public_Order, big.mark = ",")
+          ), htmltools::HTML),
+          labelOptions = labelOptions(
+            style = list("font-size" = "12px", "font-family" = "Arial"),
+            direction = "auto"
+          ),
+          group = 'Crime Suburbs'
+        ) %>%
+        addLegend(
+          "bottomleft",
+          pal = pal,
+          values = crime_suburbs$Display_Count,
+          title = "All Offences<br/>Offence Count",
+          opacity = 0.7,
+          layerId = "crime_legend"
+        )
+      
+      # Add heatmap layer
+      centroids <- suppressWarnings(st_centroid(st_geometry(crime_suburbs)))
+      coords <- st_coordinates(centroids)
+      
+      map <- map %>%
+        addHeatmap(
+          lng = coords[, "X"],
+          lat = coords[, "Y"],
+          intensity = crime_suburbs$Display_Count,
+          blur = 35,
+          max = 0.7,
+          radius = 25,
+          gradient = c("yellow", "orange", "red", "darkred"),
+          group = "Crime Heatmap"
+        )
+    }
+    
+    # Add layer control
+    map <- map %>%
+      addLayersControl(
+        overlayGroups = c("Landmarks", "Crime Suburbs", "Crime Heatmap"),
+        options = layersControlOptions(collapsed = FALSE)
+      ) %>%
+      # Add custom legend for heatmap
+      addControl(
+        html = paste0(
+          "<div style='background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);'>",
+          "<h4 style='margin: 0 0 10px 0;'>Crime Heatmap Legend</h4>",
+          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+          "<div style='width: 20px; height: 20px; background: yellow; margin-right: 8px; border: 1px solid #999;'></div>",
+          "<span>Low Crime</span>",
+          "</div>",
+          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+          "<div style='width: 20px; height: 20px; background: orange; margin-right: 8px; border: 1px solid #999;'></div>",
+          "<span>Medium Crime</span>",
+          "</div>",
+          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+          "<div style='width: 20px; height: 20px; background: red; margin-right: 8px; border: 1px solid #999;'></div>",
+          "<span>High Crime</span>",
+          "</div>",
+          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
+          "<div style='width: 20px; height: 20px; background: darkred; margin-right: 8px; border: 1px solid #999;'></div>",
+          "<span>Very High Crime</span>",
+          "</div>",
+          "</div>"
+        ),
+        position = "topright"
+      )
+    
+    map
+  })
+
+  # Initialize map when switching to Crime tab
+  observeEvent(input$mypage, {
+    cat('[DEBUG-TAB] Tab changed to:', input$mypage, '\n')
+
+    if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
+      cat('[DEBUG-TAB] Crime tab detected, initializing map...\n')
+
+      # Use isolate to prevent reactive dependencies
+      isolate({
+        cat('[DEBUG-TAB] Getting crime_suburb_data...\n')
+        crime_suburbs <- crime_suburb_data()
+        cat('[DEBUG-TAB] Crime suburbs rows:', nrow(crime_suburbs), '\n')
+
+        if (nrow(crime_suburbs) > 0) {
+          category_name <- if (!is.null(input$crime_category_filter)) {
+            switch(input$crime_category_filter,
+                   "all" = "All Offences",
+                   "person" = "Crimes Against Person",
+                   "property" = "Property & Deception",
+                   "drug" = "Drug Offences",
+                   "public" = "Public Order",
+                   "All Offences")
+          } else {
+            "All Offences"
+          }
+          cat('[DEBUG-TAB] Category:', category_name, '\n')
+          cat('[DEBUG-TAB] Calling updateCrimeMap...\n')
+          updateCrimeMap(crime_suburbs, category_name)
+          cat('[DEBUG-TAB] Map update complete\n')
+        } else {
+          cat('[DEBUG-TAB] WARNING: No crime suburb data!\n')
+        }
+      })
+    }
+  }, ignoreInit = FALSE)
+
+  # Define the update function
+  updateCrimeMap <- function(crime_suburbs, category_name) {
+    cat('[DEBUG-UPDATE] updateCrimeMap called with', nrow(crime_suburbs), 'suburbs\n')
+    cat('[DEBUG-UPDATE] Category:', category_name, '\n')
+
+    # Create color palette
+    if (nrow(crime_suburbs) > 0) {
+      pal <- colorNumeric(
+        palette = c("#FEF0D9", "#FDCC8A", "#FC8D59", "#E34A33", "#B30000"),
+        domain = crime_suburbs$Display_Count
+      )
+      cat('[DEBUG-UPDATE] Color palette created\n')
+    }
+
+    # Update map layers
+    leafletProxy("crime_map") %>%
+      clearGroup("Landmarks") %>%
+      clearGroup("Crime Heatmap") %>%
+      clearGroup("Crime Suburbs") %>%
+      # Add regular POI landmarks
+      addCircleMarkers(
+        data = pois,
+        lng = ~lon, lat = ~lat,
+        radius = 7,
+        stroke = FALSE,
+        fill = TRUE,
+        fillColor = ~colour,
+        fillOpacity = 1,
+        label = ~name,
+        layerId = ~id,
+        group = 'Landmarks'
+      ) %>%
+      {
+        # Add suburb polygons
+        if (nrow(crime_suburbs) > 0) {
+          addPolygons(
+            .,
+            data = crime_suburbs,
+            fillColor = ~pal(Display_Count),
+            fillOpacity = 0.6,
+            stroke = TRUE,
+            weight = 2,
+            color = "#333333",
+            opacity = 1,
+            highlight = highlightOptions(
+              weight = 3,
+              color = "#666",
+              fillOpacity = 0.8,
+              bringToFront = TRUE
+            ),
+            label = lapply(paste0(
+              "<b>", crime_suburbs$suburb_name, "</b><br/>",
+              "<hr style='margin: 5px 0;'/>",
+              "<b>Showing:</b> ", category_name, "<br/>",
+              "<b>Current Filter:</b> ", format(crime_suburbs$Display_Count, big.mark = ","), " offences<br/>",
+              "<hr style='margin: 5px 0;'/>",
+              "<b>Total Offences:</b> ", format(crime_suburbs$Total_Offences, big.mark = ","), "<br/>",
+              "<b>Person Crimes:</b> ", format(crime_suburbs$Person_Crimes, big.mark = ","), "<br/>",
+              "<b>Property Crimes:</b> ", format(crime_suburbs$Property_Crimes, big.mark = ","), "<br/>",
+              "<b>Drug Offences:</b> ", format(crime_suburbs$Drug_Crimes, big.mark = ","), "<br/>",
+              "<b>Public Order:</b> ", format(crime_suburbs$Public_Order, big.mark = ",")
+            ), htmltools::HTML),
+            labelOptions = labelOptions(
+              style = list("font-size" = "12px", "font-family" = "Arial"),
+              direction = "auto"
+            ),
+            group = 'Crime Suburbs'
+          ) %>%
+          addLegend(
+            "bottomleft",
+            pal = pal,
+            values = crime_suburbs$Display_Count,
+            title = paste(category_name, "<br/>Offence Count"),
+            opacity = 0.7,
+            layerId = "crime_legend"
+          )
+        } else {
+          .
+        }
+      } %>%
+      {
+        # Add heatmap layer
+        if (nrow(crime_suburbs) > 0) {
+          # Calculate centroids - suppress the attributes warning
+          centroids <- suppressWarnings(st_centroid(st_geometry(crime_suburbs)))
+          coords <- st_coordinates(centroids)
+
+          addHeatmap(
+            .,
+            lng = coords[, "X"],
+            lat = coords[, "Y"],
+            intensity = crime_suburbs$Display_Count,
+            blur = 35,
+            max = 0.7,
+            radius = 25,
+            gradient = c("yellow", "orange", "red", "darkred"),
+            group = "Crime Heatmap"
+          )
+        } else {
+          .
+        }
+      }
+  }
+
+  # Update map when filters change
+  observeEvent(c(input$crime_category_filter, input$crime_min_offences), {
+    cat('[DEBUG-FILTER] Filter changed - Category:', input$crime_category_filter,
+        'Min:', input$crime_min_offences, '\n')
+    cat('[DEBUG-FILTER] Current tab:', input$mypage, '\n')
+
+    # Only update if we're on the Crime tab
+    if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
+      cat('[DEBUG-FILTER] On Crime tab, updating map...\n')
+
+      crime_suburbs <- crime_suburb_data()
+      cat('[DEBUG-FILTER] Got', nrow(crime_suburbs), 'suburbs\n')
+
+      # Only update if we have data
+      if (nrow(crime_suburbs) > 0) {
+        # Get category name for display
+        category_name <- if (!is.null(input$crime_category_filter)) {
+          switch(input$crime_category_filter,
+                 "all" = "All Offences",
+                 "person" = "Crimes Against Person",
+                 "property" = "Property & Deception",
+                 "drug" = "Drug Offences",
+                 "public" = "Public Order",
+                 "All Offences")
+        } else {
+          "All Offences"
+        }
+
+        cat('[DEBUG-FILTER] Calling updateCrimeMap with category:', category_name, '\n')
+        # Call the update function
+        updateCrimeMap(crime_suburbs, category_name)
+      } else {
+        cat('[DEBUG-FILTER] WARNING: No suburbs to display!\n')
+      }
+    } else {
+      cat('[DEBUG-FILTER] Not on Crime tab, skipping update\n')
+    }
+  }, ignoreNULL = FALSE)
+
+  # Crime Map Summary Table
+  output$crime_map_table <- renderDT({
+    # Get suburb-level summary from the crime data
+    crime_suburb_summary <- crime_data$table03 %>%
+      group_by(`Suburb/Town Name`) %>%
+      summarise(
+        Total_Offences = sum(`Offence Count`, na.rm = TRUE),
+        Person_Crimes = sum(`Offence Count`[grepl("person", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Property_Crimes = sum(`Offence Count`[grepl("property|deception", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Drug_Crimes = sum(`Offence Count`[grepl("drug", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        Public_Order = sum(`Offence Count`[grepl("public order|justice", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
+        .groups = 'drop'
+      ) %>%
+      arrange(desc(Total_Offences))
+
+    # Apply minimum filter
+    min_val <- if (!is.null(input$crime_min_offences)) input$crime_min_offences else 0
+    crime_suburb_summary <- crime_suburb_summary %>%
+      filter(Total_Offences >= min_val)
+
+    datatable(
+      crime_suburb_summary,
+      options = list(pageLength = 10, scrollX = TRUE),
+      rownames = FALSE,
+      colnames = c("Suburb", "Total Offences", "Person", "Property", "Drug", "Public Order")
+    ) %>%
+      formatStyle(
+        'Total_Offences',
+        background = styleColorBar(crime_suburb_summary$Total_Offences, '#FFA07A'),
+        backgroundSize = '100% 90%',
+        backgroundRepeat = 'no-repeat',
+        backgroundPosition = 'center'
+      )
+  })
+
+  # Overview - Custom info boxes (replacing valueBox for navbarPage compatibility)
+  output$total_offences <- renderUI({
     total <- sum(crime_data$table01$`Offence Count`, na.rm = TRUE)
-    valueBox(format(total, big.mark = ","), "Total Offences",
-             icon = icon("exclamation-triangle"), color = "red")
+    tags$div(
+      class = "well text-center",
+      style = "background-color: #f8d7da; border-color: #f5c6cb; padding: 20px;",
+      tags$h3(format(total, big.mark = ","), style = "margin: 0; color: #721c24;"),
+      tags$p("Total Offences", style = "margin: 5px 0 0 0; color: #721c24;")
+    )
   })
-  
-  output$crime_rate <- renderValueBox({
+
+  output$crime_rate <- renderUI({
     rate <- mean(crime_data$table01$`Rate per 100,000 population`, na.rm = TRUE)
-    valueBox(round(rate, 1), "Crime Rate per 100,000",
-             icon = icon("chart-line"), color = "orange")
+    tags$div(
+      class = "well text-center",
+      style = "background-color: #fff3cd; border-color: #ffeaa7; padding: 20px;",
+      tags$h3(round(rate, 1), style = "margin: 0; color: #856404;"),
+      tags$p("Crime Rate per 100,000", style = "margin: 5px 0 0 0; color: #856404;")
+    )
   })
-  
-  output$police_region <- renderValueBox({
+
+  output$police_region <- renderUI({
     region <- unique(crime_data$table01$`Police Region`)[1]
-    valueBox(region, "Police Region",
-             icon = icon("shield"), color = "blue")
+    tags$div(
+      class = "well text-center",
+      style = "background-color: #d1ecf1; border-color: #bee5eb; padding: 20px;",
+      tags$h3(region, style = "margin: 0; color: #0c5460;"),
+      tags$p("Police Region", style = "margin: 5px 0 0 0; color: #0c5460;")
+    )
   })
   
   output$overview_summary <- renderPrint({
@@ -1716,15 +2831,28 @@ server <- function(input, output, session) {
   })
   
   # --- Melbourne Crime Navigation Logic ---
+  observeEvent(input$nav_crime_map, {
+    output$crime_main_panel <- renderUI({
+      tagList(
+        h3("Crime Map - Interactive Visualization"),
+        p("Click on markers to see detailed crime statistics for each area. Use the filters on the left to customize the view."),
+        leafletOutput("crime_map", width = "100%", height = 600),
+        br(),
+        h4("Suburb Crime Statistics"),
+        DTOutput("crime_map_table")
+      )
+    })
+  })
+
   observeEvent(input$nav_overview, {
     output$crime_main_panel <- renderUI({
       tagList(
         h3("Overview"),
         br(),
         fluidRow(
-          valueBoxOutput("total_offences", width = 4),
-          valueBoxOutput("crime_rate", width = 4),
-          valueBoxOutput("police_region", width = 4)
+          column(4, uiOutput("total_offences")),
+          column(4, uiOutput("crime_rate")),
+          column(4, uiOutput("police_region"))
         ),
         br(),
         verbatimTextOutput("overview_summary")
@@ -1823,18 +2951,15 @@ server <- function(input, output, session) {
     })
   })
   
-  # --- Default display (Overview when first opened) ---
+  # --- Default display (Crime Map when first opened) ---
   output$crime_main_panel <- renderUI({
     tagList(
-      h3("Overview"),
+      h3("Crime Map - Interactive Visualization"),
+      p("Click on markers to see detailed crime statistics for each area. Use the filters on the left to customize the view."),
+      leafletOutput("crime_map", width = "100%", height = 600),
       br(),
-      fluidRow(
-        column(4, valueBoxOutput("total_offences")),
-        column(4, valueBoxOutput("crime_rate")),
-        column(4, valueBoxOutput("police_region"))
-      ),
-      br(),
-      verbatimTextOutput("overview_summary")
+      h4("Suburb Crime Statistics"),
+      DTOutput("crime_map_table")
     )
   })
   
