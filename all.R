@@ -1406,13 +1406,13 @@ ui <- navbarPage(
     sidebarLayout(
       sidebarPanel(
         selectInput(
-          inputId = 'type',
+          inputId = 'type_parking',
           label = 'POI Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
-        h4("Select Landmarks to Find Nearby Transport"),
-        helpText("Choose one or more landmarks to find nearby PT stops and stations"),
+        h4("Select Landmarks for Parking Search"),
+        helpText("Choose one or more landmarks to find nearby parking"),
         selectizeInput(
           "lm_name_parking",
           "Landmark(s)",
