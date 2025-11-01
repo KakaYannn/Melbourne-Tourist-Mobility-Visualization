@@ -1177,6 +1177,10 @@ ui <- navbarPage(
       #crime_tabs .nav-tabs > li > a:hover {
         color: #000000;
       }
+      /* Hide layer control for parking map only */
+      #map_parking .leaflet-control-layers {
+        display: none !important;
+      }
     "))
   ),
   
@@ -2150,6 +2154,11 @@ server <- function(input, output, session) {
     # Union all buffers into one
     if (nrow(buf) > 1) {
       buf <- sf::st_union(buf) |> sf::st_sf()
+    } else {
+      # Ensure single buffer is also an sf object
+      if (!inherits(buf, "sf")) {
+        buf <- sf::st_sf(geometry = buf)
+      }
     }
 
     sf::st_transform(buf, 4326)
@@ -2163,7 +2172,19 @@ server <- function(input, output, session) {
 
     # Spatial filter: sensors that intersect with buffer
     if (nrow(ped_geo) > 0) {
-      intersects <- sf::st_intersects(ped_geo, buf, sparse = FALSE)
+      # Convert ped_geo to sf object if it's not already
+      if (!inherits(ped_geo, "sf")) {
+        ped_geo_sf <- st_as_sf(ped_geo, coords = c("Longitude", "Latitude"), crs = 4326)
+      } else {
+        ped_geo_sf <- ped_geo
+      }
+      
+      # Ensure buffer is an sf object
+      if (!inherits(buf, "sf")) {
+        buf <- st_as_sf(buf)
+      }
+      
+      intersects <- sf::st_intersects(ped_geo_sf, buf, sparse = FALSE)
       sensors_filtered <- ped_geo[as.vector(intersects), ]
       return(sensors_filtered)
     } else {
