@@ -98,6 +98,10 @@ lines <- st_filter(lines, boundary, .predicate = st_intersects)
 
 # filter redundant lines
 flem <- lines[lines$destination == 'Flemington Racecourse', ]
+cran <- lines[match(TRUE, (lines$destination == 'Flinders Street via City Loop') & (lines$shortname == 'Cranbourne')), ]
+cran$destination <- 'Cranbourne via City Loop'
+pak <- lines[match(TRUE, (lines$destination == 'Flinders Street via City Loop') & (lines$shortname == 'Pakenham')), ]
+pak$destination <- 'Pakenham via City Loop'
 lines <- lines %>%
   mutate(
     firstword = sub("^(\\S+).*", "\\1", longname),
@@ -114,7 +118,7 @@ lines <- lines %>%
   ungroup() %>%
   select(-firstword, -cityloop, -type)
 lines <- lines[lines$shortname != 'Replacement Bus', ]
-lines <- rbind(lines, flem)
+lines <- rbind(lines, flem, cran, pak)
 
 # add unique id columns
 stops$id <- paste0('stop', seq_len(nrow(stops)))
