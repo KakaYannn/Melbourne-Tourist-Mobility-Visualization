@@ -1181,6 +1181,10 @@ ui <- navbarPage(
       #map_parking .leaflet-control-layers {
         display: none !important;
       }
+      /* Hide layer control for crime map only */
+      #crime_map .leaflet-control-layers {
+        display: none !important;
+      }
     "))
   ),
   
@@ -1545,7 +1549,46 @@ ui <- navbarPage(
             id = "hidden_tables_panel",
             style = "display: none;",
             uiOutput("tables_panel")
-          )
+          ),
+          # JavaScript to hide layer control for crime map
+          tags$script(HTML("
+            // Hide the entire layer control panel on crime map
+            function hideCrimeMapLayerControl() {
+              // Search all layer controls and find the one with crime map labels
+              var allControls = document.querySelectorAll('.leaflet-control-layers');
+              for (var i = 0; i < allControls.length; i++) {
+                var labels = allControls[i].querySelectorAll('label');
+                var foundCrimeLayer = false;
+                for (var j = 0; j < labels.length; j++) {
+                  var labelText = labels[j].textContent.trim();
+                  // Check if this is the crime map layer control
+                  if (labelText === 'Crime Suburbs' || labelText === 'All Landmarks' || 
+                      labelText === 'Filtered Landmarks' || labelText === 'Crime Heatmap') {
+                    foundCrimeLayer = true;
+                    break;
+                  }
+                }
+                // If found, hide the entire layer control panel
+                if (foundCrimeLayer) {
+                  allControls[i].style.display = 'none';
+                }
+              }
+            }
+
+            // Run on map initialization
+            $(document).on('shiny:value', function(event) {
+              if (event.target.id === 'crime_map') {
+                hideCrimeMapLayerControl();
+              }
+            });
+
+            // Run periodically to catch layer control when it appears
+            var checkIntervalCrime = setInterval(function() {
+              hideCrimeMapLayerControl();
+              // Stop checking after 5 seconds
+            }, 500);
+            setTimeout(function() { clearInterval(checkIntervalCrime); }, 5000);
+          "))
         )
       )
     )
@@ -1559,6 +1602,9 @@ server <- function(input, output, session) {
   
   # Reactive value to track current view for clear filter functionality
   current_view <- reactiveVal("crime_map")
+  
+  # Store current station for chart rendering
+  selected_station_data <- reactiveVal(NULL)
   
   
   
@@ -1640,39 +1686,32 @@ server <- function(input, output, session) {
       )
     }
     
-    # stop click
-    else if (startsWith(id, 'stop')) {
-      currstop <- stops2[stops$id == id, ]
-      
-      # find lines associated with stop
-      linesnear <- lines[as.numeric(st_distance(lines2, currstop)) <= 30, ]
-      linesnear <- linesnear[linesnear$mode == currstop$mode, ]
-      
-      # update map
-      leafletProxy('mappt') %>%
-        clearGroup('linesnear') %>%
+      # stop click
+      else if (startsWith(id, 'stop')) {
+        currstop <- stops2[stops$id == id, ]
         
-        # add lines
-        {if (nrow(linesnear) > 0) addPolylines(., data = linesnear, 
+        # find lines associated with stop
+        linesnear <- lines[as.numeric(st_distance(lines2, currstop)) <= 30, ]
+        linesnear <- linesnear[linesnear$mode == currstop$mode, ]
+        
+        # update map
+        leafletProxy('mappt') %>%
+          clearGroup('linesnear') %>%
+          
+          # add lines
+          {if (nrow(linesnear) > 0) addPolylines(., data = linesnear, 
                                                color = ~colour, 
                                                fill = FALSE, 
                                                label = ~shortname, 
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
-      
-      # stop info box
-      output$infopt <- renderUI({
         
-        # panel
-        tagList(
-          h3(currstop$name), 
-          h6(''), 
-          h4('Routes:'), 
-          tags$ul(lapply(unique(linesnear$shortname), tags$li))
-        )
-      })
-    }
+        # Clear info box - information is now in tooltip
+        output$infopt <- renderUI({
+          NULL
+        })
+      }
     
     # station click
     else if (startsWith(id, 'station')) {
@@ -1694,29 +1733,36 @@ server <- function(input, output, session) {
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
-    
-      # station info box
-      output$infopt <- renderUI({
         
-        # panel
-        tagList(
-          h3(paste0(currstation$station, ' Station')), 
-          h6(''), 
-          h4('Lines:'), 
-          tags$ul(lapply(unique(linesnear$shortname), tags$li)),
-          h6(''), 
-          h4(paste0('Annual Patronage: ', format(currstation$annual, big.mark = ','))), 
-          h6(''), 
-          girafeOutput('typeplot', height = 300), 
-          h6(''), 
-          girafeOutput('timeplot', height = 300)
-        )
+      # Clear info box - information is now in tooltip
+      output$infopt <- renderUI({
+        NULL
       })
       
-      # type of day patronage
-      output$typeplot <- renderGirafe({
-        
-        # create dataframe
+      # Store current station for chart rendering
+      selected_station_data(currstation)
+    }
+  })
+  
+  # Handle chart button clicks from station tooltips
+  observeEvent(input$show_station_chart, {
+    if (is.null(input$show_station_chart) || input$show_station_chart == "") return()
+    
+    chart_info <- strsplit(input$show_station_chart, "_")[[1]]
+    if (length(chart_info) < 2) return()
+    
+    station_id <- paste(chart_info[-length(chart_info)], collapse = "_")
+    chart_type <- chart_info[length(chart_info)]
+    
+    # Find station by ID
+    currstation <- stations2[stations2$id == station_id, ]
+    if (nrow(currstation) == 0) return()
+    
+    selected_station_data(currstation)
+    
+    if (chart_type == "daytype") {
+      # Show day type chart modal
+      output$modal_day_type_plot <- renderGirafe({
         df <- data.frame(
           type = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'), 
           value = c(currstation$weekday, 
@@ -1727,7 +1773,6 @@ server <- function(input, output, session) {
         )
         df$type <- factor(df$type, levels = c('Weekday', 'Normal Weekday', 'Sch/Hol Weekday', 'Saturday', 'Sunday'))
         
-        # create plot
         p <- ggplot(df) + 
           aes(x = type, y = value, tooltip = value) + 
           geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
@@ -1736,11 +1781,17 @@ server <- function(input, output, session) {
         
         girafe(ggobj = p)
       })
-    
-      # time of day patronage
-      output$timeplot <- renderGirafe({
-        
-        # create dataframe
+      
+      showModal(modalDialog(
+        title = paste0(currstation$station, " Station - Average Patronage per Day Type"),
+        girafeOutput("modal_day_type_plot", height = 400),
+        easyClose = TRUE,
+        footer = modalButton("Close"),
+        size = "l"
+      ))
+    } else if (chart_type == "timeperiod") {
+      # Show time period chart modal
+      output$modal_time_period_plot <- renderGirafe({
         df <- data.frame(
           time = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'), 
           value = c(currstation$early, 
@@ -1751,7 +1802,6 @@ server <- function(input, output, session) {
         )
         df$time <- factor(df$time, levels = c('Before 7am', '7am - 9:30am', '9:30am - 3pm', '3pm - 7pm', 'After 7pm'))
         
-        # create plot
         p <- ggplot(df) + 
           aes(x = time, y = value, tooltip = value) + 
           geom_bar_interactive(stat = 'identity', fill = '#0071cd') + 
@@ -1760,6 +1810,14 @@ server <- function(input, output, session) {
         
         girafe(ggobj = p)
       })
+      
+      showModal(modalDialog(
+        title = paste0(currstation$station, " Station - Average Patronage per Time Period"),
+        girafeOutput("modal_time_period_plot", height = 400),
+        easyClose = TRUE,
+        footer = modalButton("Close"),
+        size = "l"
+      ))
     }
   })
 
@@ -1776,6 +1834,9 @@ server <- function(input, output, session) {
 
   # Update PT landmark choices when POI type changes
   observe({
+    # Only update if we're on the Public Transport tab
+    if (is.null(input$mypage) || input$mypage != "Public Transport") return()
+
     filtered_pois <- filtered_pois_pt()
     updateSelectizeInput(
       session,
@@ -1920,23 +1981,90 @@ server <- function(input, output, session) {
 
       # Add filtered PT stops
       if (nrow(stops_sf) > 0) {
-        map <- addAwesomeMarkers(
-          map,
-          data = stops_sf,
-          lng = ~lon, lat = ~lat,
-          icon = ~awesomeIcons(library = 'fa',
-                               markerColor = ~colour,
-                               icon = ~icon,
-                               iconColor = '#ffffff'),
-          label = ~name,
-          layerId = ~id,
-          group = 'Filtered Stops'
-        )
-        map <- showGroup(map, "Filtered Stops")
+        # Filter stops to only include those with routes and create popups
+        stops_with_routes_list <- lapply(seq_len(nrow(stops_sf)), function(i) {
+          stop_row <- stops_sf[i, ]
+          stop_proj <- st_transform(stop_row, 3857)
+          lines_near <- lines[as.numeric(st_distance(lines2, stop_proj)) <= 30, ]
+          lines_near <- lines_near[lines_near$mode == stop_row$mode, ]
+          
+          # Only return stop if it has routes
+          if (nrow(lines_near) > 0) {
+            routes_list <- paste(unique(lines_near$shortname), collapse = ", ")
+            popup_html <- paste0(
+              "<div style='font-family: Inter, sans-serif;'>",
+              "<h4 style='margin: 0 0 10px 0; font-weight: 600;'>", htmlEscape(stop_row$name), "</h4>",
+              "<p style='margin: 5px 0;'><strong>Mode:</strong> ", htmlEscape(stop_row$mode), "</p>",
+              "<p style='margin: 5px 0 0 0;'><strong>Routes:</strong> ", routes_list, "</p>",
+              "</div>"
+            )
+            return(list(stop = stop_row, popup = popup_html))
+          } else {
+            return(NULL)
+          }
+        })
+        
+        # Filter out NULL entries (stops with no routes)
+        stops_with_routes_list <- stops_with_routes_list[!sapply(stops_with_routes_list, is.null)]
+        
+        # Only add stops that have routes
+        if (length(stops_with_routes_list) > 0) {
+          # Reconstruct sf object with only stops that have routes
+          stops_with_routes <- do.call(rbind, lapply(stops_with_routes_list, function(x) x$stop))
+          stops_with_routes$popup_html <- sapply(stops_with_routes_list, function(x) x$popup)
+          
+          map <- addAwesomeMarkers(
+            map,
+            data = stops_with_routes,
+            lng = ~lon, lat = ~lat,
+            icon = ~awesomeIcons(library = 'fa',
+                                 markerColor = ~colour,
+                                 icon = ~icon,
+                                 iconColor = '#ffffff'),
+            label = ~name,
+            popup = ~popup_html,
+            popupOptions = popupOptions(
+              maxWidth = 300,
+              style = list("font-size" = "12px")
+            ),
+            layerId = ~id,
+            group = 'Filtered Stops'
+          )
+          map <- showGroup(map, "Filtered Stops")
+        }
       }
 
       # Add filtered PT stations
       if (nrow(stations_sf) > 0) {
+        # Create popups for stations with chart buttons
+        stations_sf$popup_html <- sapply(seq_len(nrow(stations_sf)), function(i) {
+          station_row <- stations_sf[i, ]
+          station_proj <- st_transform(station_row, 3857)
+          lines_near <- lines[as.numeric(st_distance(lines2, station_proj)) <= 500, ]
+          lines_near <- lines_near[lines_near$mode == 'METRO TRAIN', ]
+          
+          station_lines <- if (nrow(lines_near) > 0) {
+            paste(unique(lines_near$shortname), collapse = ", ")
+          } else {
+            "No lines found"
+          }
+          
+          station_id_js <- gsub("'", "\\'", station_row$id)
+          station_id_js <- gsub('"', '\\"', station_id_js)
+          
+          paste0(
+            "<div style='font-family: Inter, sans-serif;'>",
+            "<h4 style='margin: 0 0 10px 0; font-weight: 600;'>", htmlEscape(station_row$station), "</h4>",
+            "<p style='margin: 5px 0 10px 0;'><strong>Lines:</strong> ", station_lines, "</p>",
+            "<p style='margin: 10px 0;'><strong>Annual Patronage:</strong> ", format(station_row$annual, big.mark = ","), "</p>",
+            "<div style='margin-top: 10px;'>",
+            "<a href='#' onclick=\"Shiny.setInputValue('show_station_chart', '", station_id_js, "_daytype', {priority: 'event'}); return false;\" style='background: #007bff; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block; font-size: 11px;'>Average Patronage per Day Type</a> ",
+            "<a href='#' onclick=\"Shiny.setInputValue('show_station_chart', '", station_id_js, "_timeperiod', {priority: 'event'}); return false;\" style='background: #6c757d; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block; font-size: 11px;'>Average Patronage per Time Period</a>",
+            "</div>",
+            "</div>"
+          )
+        })
+        
         map <- addAwesomeMarkers(
           map,
           data = stations_sf,
@@ -1946,6 +2074,11 @@ server <- function(input, output, session) {
                                icon = ~icon,
                                iconColor = '#ffffff'),
           label = ~station,
+          popup = ~popup_html,
+          popupOptions = popupOptions(
+            maxWidth = 300,
+            style = list("font-size" = "12px")
+          ),
           layerId = ~id,
           group = 'Filtered Stations'
         )
@@ -2053,15 +2186,29 @@ server <- function(input, output, session) {
       theme_minimal(base_size = 12) +
       theme(legend.position = "bottom",
             plot.title = element_text(size = 14, face = "bold", family = "Inter"),
-            text = element_text(family = "Inter"),
-            axis.text = element_text(family = "Inter"),
-            axis.title = element_text(family = "Inter"),
-            legend.text = element_text(family = "Inter"),
-            legend.title = element_text(family = "Inter")) + 
+            text = element_text(family = "Inter", size = 12),
+            axis.text = element_text(family = "Inter", size = 12),
+            axis.title = element_text(family = "Inter", size = 12),
+            legend.text = element_text(family = "Inter", size = 12),
+            legend.title = element_text(family = "Inter", size = 12)) + 
       scale_fill_manual(values = colourvals, name = 'Type')
     
     ggplotly(p, tooltip = c("x", "y", "fill")) %>%
-      layout(font = list(family = "Inter"))
+      layout(
+        font = list(family = "Inter", size = 12),
+        title = list(
+          text = "Top 15 POIs by Nearby Pedestrian Volume",
+          font = list(family = "Inter", size = 14)
+        ),
+        xaxis = list(
+          title = list(text = "Avg Pedestrian Count (nearest sensor)", font = list(family = "Inter", size = 12)),
+          tickfont = list(family = "Inter", size = 12)
+        ),
+        yaxis = list(
+          title = list(text = "Point of Interest", font = list(family = "Inter", size = 12)),
+          tickfont = list(family = "Inter", size = 12)
+        )
+      )
   })
   
   # Trend View (linked to theme filter)
@@ -2093,12 +2240,21 @@ server <- function(input, output, session) {
       marker = list(size = 4, color = "#004080")
     ) %>%
       layout(
-        title = paste0("Pedestrian Flow Over Time — ",
+        title = list(
+          text = paste0("Pedestrian Flow Over Time — ",
                        ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
-        xaxis = list(title = "Date"),
-        yaxis = list(title = "Total Pedestrians"),
+          font = list(family = "Inter", size = 14)
+        ),
+        xaxis = list(
+          title = list(text = "Date", font = list(family = "Inter", size = 12)),
+          tickfont = list(family = "Inter", size = 12)
+        ),
+        yaxis = list(
+          title = list(text = "Total Pedestrians", font = list(family = "Inter", size = 12)),
+          tickfont = list(family = "Inter", size = 12)
+        ),
         hovermode = "x unified",
-        font = list(family = "Inter")
+        font = list(family = "Inter", size = 12)
       )
   })
 
@@ -2115,6 +2271,9 @@ server <- function(input, output, session) {
 
   # Update Pedestrian landmark choices when POI type changes
   observe({
+    # Only update if we're on the Pedestrian Counts tab
+    if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
+
     filtered_pois <- filtered_pois_pedestrian()
     updateSelectizeInput(
       session,
@@ -2340,6 +2499,9 @@ server <- function(input, output, session) {
 
   # Update landmark choices when POI type changes
   observe({
+    # Only update if we're on the On-street Parking tab
+    if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
+
     filtered_pois <- filtered_pois_parking()
     updateSelectizeInput(
       session,
@@ -3198,6 +3360,9 @@ server <- function(input, output, session) {
 
   # Update landmark choices when POI type changes
   observe({
+    # Only update if we're on the Security View tab
+    if (is.null(input$mypage) || input$mypage != "Security View") return()
+
     filtered_pois <- filtered_pois_crime()
     updateSelectizeInput(
       session,
@@ -3809,7 +3974,8 @@ server <- function(input, output, session) {
               options = list(pageLength = 100, scrollX = TRUE, 
                             lengthMenu = FALSE,
                             paging = FALSE,
-                            dom = 'ti'),  # 't' = table, 'i' = info (no 'p' for pagination)
+                            info = FALSE,
+                            dom = 't'),  # 't' = table only (no info, no pagination)
               rownames = FALSE)
   })
   
