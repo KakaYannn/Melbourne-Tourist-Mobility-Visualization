@@ -253,7 +253,7 @@ routes_signatures <- sapply(seq_len(nrow(stops_proj_for_routes)), function(i) {
   # Find lines within 30m with same mode
   lines_near <- lines_proj_for_routes[
     as.numeric(st_distance(lines_proj_for_routes, stop_proj)) <= 30 & 
-    lines_proj_for_routes$mode == stop_proj$mode, 
+      lines_proj_for_routes$mode == stop_proj$mode, 
   ]
   
   # Create signature: sorted unique route shortnames
@@ -477,7 +477,7 @@ if (!is.null(segment_locations) && nrow(segment_locations) > 0 && nrow(zones_to_
     dplyr::select(segment_id, num_bays) |>
     dplyr::left_join(zones_to_segments, by = "segment_id", relationship = "many-to-many") |>
     dplyr::filter(!is.na(zone_id))
-
+  
   # Re-attach geometry and aggregate by zone
   zone_locations <- segment_zone_map |>
     dplyr::left_join(
@@ -654,31 +654,31 @@ if (!is.null(unmatched_segments) && nrow(unmatched_segments) > 0) {
 # Load and preprocess data
 load_data <- function() {
   file_path <- "Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx"
-
+  
   # Table 01: Overall offence counts by LGA
   table01 <- read_excel(file_path, sheet = "Table 01") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   # Table 02: Offences by category (Division, Subdivision, Subgroup)
   table02 <- read_excel(file_path, sheet = "Table 02") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   # Table 03: Offences by suburb/postcode
   table03 <- read_excel(file_path, sheet = "Table 03") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   # Table 04: Offences by location type
   table04 <- read_excel(file_path, sheet = "Table 04") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   # Table 05: Investigation status
   table05 <- read_excel(file_path, sheet = "Table 05") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   # Table 06: Drug offences
   table06 <- read_excel(file_path, sheet = "Table 06") %>%
     filter(`Local Government Area` == "Melbourne")
-
+  
   list(
     table01 = table01,
     table02 = table02,
@@ -699,7 +699,7 @@ load_suburb_boundaries <- function() {
   if (requireNamespace("osmdata", quietly = TRUE)) {
     tryCatch({
       library(osmdata, quietly = TRUE)
-
+      
       # Get Melbourne bounding box (larger area to capture all suburbs)
       bbox_melb <- getbb("Melbourne, Australia", featuretype = "city")
       if (is.null(bbox_melb) || nrow(bbox_melb) == 0) {
@@ -709,7 +709,7 @@ load_suburb_boundaries <- function() {
       }
       
       # Query all suburbs in Melbourne area - need ADMINISTRATIVE boundaries, not just place tags
-
+      
       # Try query for administrative boundaries (admin_level 10 = suburb/neighborhood level)
       q <- opq(bbox = bbox_melb) %>%
         add_osm_feature(key = "admin_level", value = "10") %>%
@@ -755,7 +755,7 @@ load_suburb_boundaries <- function() {
         # Verify these are actually polygons, not points
         geom_types <- st_geometry_type(suburbs_all$geometry)
         polygon_count <- sum(geom_types %in% c("POLYGON", "MULTIPOLYGON"))
-
+        
         # Filter to only polygon geometries (exclude any points/lines that got through)
         if (polygon_count > 0) {
           suburbs_all <- suburbs_all[geom_types %in% c("POLYGON", "MULTIPOLYGON"), ]
@@ -822,10 +822,10 @@ suburbs_all <- load_suburb_boundaries()
 # Filter to Melbourne LGA suburbs (ALL suburbs from crime data)
 # Normalize suburb names for matching - be flexible with name variations
 melbourne_suburb_names <- c('MELBOURNE', 'SOUTHBANK', 'DOCKLANDS', 'CARLTON',
-                           'CARLTON NORTH', 'NORTH MELBOURNE', 'WEST MELBOURNE',
-                           'EAST MELBOURNE', 'PARKVILLE', 'KENSINGTON',
-                           'PORT MELBOURNE', 'SOUTH WHARF', 'SOUTH YARRA',
-                           'FLEMINGTON')
+                            'CARLTON NORTH', 'NORTH MELBOURNE', 'WEST MELBOURNE',
+                            'EAST MELBOURNE', 'PARKVILLE', 'KENSINGTON',
+                            'PORT MELBOURNE', 'SOUTH WHARF', 'SOUTH YARRA',
+                            'FLEMINGTON')
 
 # Create flexible matching function that handles name variations
 match_suburb_name <- function(name, targets) {
@@ -969,7 +969,7 @@ if (length(melbourne_suburbs_list) > 0) {
     group_by(suburb_name) %>%
     summarise(geometry = st_union(geometry), .groups = 'drop') %>%
     st_make_valid()
-
+  
   # First, detect if there are actually any overlaps
   n_suburbs <- nrow(melbourne_suburbs)
   overlap_detected <- FALSE
@@ -1014,7 +1014,7 @@ if (length(melbourne_suburbs_list) > 0) {
               if (!is.na(overlap_area) && overlap_area > 0.000001) {  # Very small threshold to ignore tiny overlaps
                 overlap_detected <- TRUE
                 overlap_info <- paste0(suburb1$suburb_name, ' <-> ', suburb2$suburb_name,
-                                      ' (area: ', format(overlap_area, scientific = FALSE), ')')
+                                       ' (area: ', format(overlap_area, scientific = FALSE), ')')
                 overlap_details[[length(overlap_details) + 1]] <- overlap_info
               }
             }
@@ -1189,7 +1189,7 @@ if (length(melbourne_suburbs_list) > 0) {
       st_make_valid() %>%
       filter(!st_is_empty(geometry)) %>%
       distinct(suburb_name, .keep_all = TRUE)
-
+    
     # Apply overlap resolution to fallback results too (with priority logic)
     n_suburbs <- nrow(melbourne_suburbs)
     if (n_suburbs > 1) {
@@ -1649,81 +1649,81 @@ ui <- navbarPage(
         ),
         hr(),
         selectInput("crime_category_filter", "Crime Category:",
-                   choices = c("All Offences" = "all",
-                              "Crimes Against Person" = "person",
-                              "Property & Deception" = "property",
-                              "Drug Offences" = "drug",
-                              "Public Order" = "public"),
-                   selected = "all"),
-          # Hidden links for tooltip redirects (not visible to users)
-          tags$div(
-            style = "display: none;",
-            actionLink("nav_categories", ""),
-            actionLink("nav_suburbs", ""),
-            actionLink("nav_tables", ""),
-            actionLink("nav_locations", "")
-          ),
+                    choices = c("All Offences" = "all",
+                                "Crimes Against Person" = "person",
+                                "Property & Deception" = "property",
+                                "Drug Offences" = "drug",
+                                "Public Order" = "public"),
+                    selected = "all"),
+        # Hidden links for tooltip redirects (not visible to users)
+        tags$div(
+          style = "display: none;",
+          actionLink("nav_categories", ""),
+          actionLink("nav_suburbs", ""),
+          actionLink("nav_tables", ""),
+          actionLink("nav_locations", "")
+        ),
         style = 'max-width: 400px'
       ),
       mainPanel(
         tabsetPanel(
-            id = "crime_tabs",
-            type = "tabs",
-            selected = "crime_map_tab",
-            tabPanel(
-              "Overview",
-              value = "overview_tab",
-              h5("Melbourne Crime Statistics - Year Ending June 2025"),
-              br(),
-              fluidRow(
-                column(4, uiOutput("total_offences")),
-                column(4, uiOutput("crime_rate")),
-                column(4, uiOutput("police_region"))
-              ),
-              br(),
-              h6("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
-              plotlyOutput("location_sunburst", width = "100%", height = 600)
+          id = "crime_tabs",
+          type = "tabs",
+          selected = "crime_map_tab",
+          tabPanel(
+            "Overview",
+            value = "overview_tab",
+            h5("Melbourne Crime Statistics - Year Ending June 2025"),
+            br(),
+            fluidRow(
+              column(4, uiOutput("total_offences")),
+              column(4, uiOutput("crime_rate")),
+              column(4, uiOutput("police_region"))
             ),
-            tabPanel(
-              "Interactive Map",
-              value = "crime_map_tab",
-              leafletOutput("crime_map", width = "100%", height = 600)
+            br(),
+            h6("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
+            plotlyOutput("location_sunburst", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Interactive Map",
+            value = "crime_map_tab",
+            leafletOutput("crime_map", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Investigation Status",
+            value = "investigation_tab",
+            br(),
+            fluidRow(
+              column(6, plotlyOutput("investigation_pie", width = "100%", height = 400)),
+              column(6, plotlyOutput("investigation_bar", width = "100%", height = 400))
             ),
-            tabPanel(
-              "Investigation Status",
-              value = "investigation_tab",
-              br(),
-              fluidRow(
-                column(6, plotlyOutput("investigation_pie", width = "100%", height = 400)),
-                column(6, plotlyOutput("investigation_bar", width = "100%", height = 400))
-              ),
-              br(),
-              DTOutput("investigation_table", width = "100%")
-            ),
-            tabPanel(
-              "Drug Offences",
-              value = "drugs_tab",
-              br(),
-              selectInput("drug_filter", "Drug Filter By:",
-                          choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
-                          selected = "CSA Drug Type"),
-              br(),
-              plotlyOutput("drug_plot", width = "100%", height = 600)
-            )
+            br(),
+            DTOutput("investigation_table", width = "100%")
           ),
-          # Hidden panels for tooltip navigation (not visible as tabs)
-          tags$div(
-            id = "hidden_categories_panel",
-            style = "display: none;",
-            uiOutput("categories_panel")
-          ),
-          tags$div(
-            id = "hidden_tables_panel",
-            style = "display: none;",
-            uiOutput("tables_panel")
-          ),
-          # JavaScript to hide layer control for crime map
-          tags$script(HTML("
+          tabPanel(
+            "Drug Offences",
+            value = "drugs_tab",
+            br(),
+            selectInput("drug_filter", "Drug Filter By:",
+                        choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
+                        selected = "CSA Drug Type"),
+            br(),
+            plotlyOutput("drug_plot", width = "100%", height = 600)
+          )
+        ),
+        # Hidden panels for tooltip navigation (not visible as tabs)
+        tags$div(
+          id = "hidden_categories_panel",
+          style = "display: none;",
+          uiOutput("categories_panel")
+        ),
+        tags$div(
+          id = "hidden_tables_panel",
+          style = "display: none;",
+          uiOutput("tables_panel")
+        ),
+        # JavaScript to hide layer control for crime map
+        tags$script(HTML("
             // Hide the entire layer control panel on crime map
             function hideCrimeMapLayerControl() {
               // Search all layer controls and find the one with crime map labels
@@ -1761,10 +1761,10 @@ ui <- navbarPage(
             }, 500);
             setTimeout(function() { clearInterval(checkIntervalCrime); }, 5000);
           "))
-        )
       )
     )
   )
+)
 
 # --- Server ---
 server <- function(input, output, session) {
@@ -1780,7 +1780,7 @@ server <- function(input, output, session) {
   
   
   
-# --- PT Visualisations ---
+  # --- PT Visualisations ---
   
   # create map
   output$mappt <- renderLeaflet({
@@ -1858,32 +1858,32 @@ server <- function(input, output, session) {
       )
     }
     
-      # stop click
-      else if (startsWith(id, 'stop')) {
-        currstop <- stops2[stops$id == id, ]
+    # stop click
+    else if (startsWith(id, 'stop')) {
+      currstop <- stops2[stops$id == id, ]
+      
+      # find lines associated with stop
+      linesnear <- lines[as.numeric(st_distance(lines2, currstop)) <= 30, ]
+      linesnear <- linesnear[linesnear$mode == currstop$mode, ]
+      
+      # update map
+      leafletProxy('mappt') %>%
+        clearGroup('linesnear') %>%
         
-        # find lines associated with stop
-        linesnear <- lines[as.numeric(st_distance(lines2, currstop)) <= 30, ]
-        linesnear <- linesnear[linesnear$mode == currstop$mode, ]
-        
-        # update map
-        leafletProxy('mappt') %>%
-          clearGroup('linesnear') %>%
-          
-          # add lines
-          {if (nrow(linesnear) > 0) addPolylines(., data = linesnear, 
+        # add lines
+        {if (nrow(linesnear) > 0) addPolylines(., data = linesnear, 
                                                color = ~colour, 
                                                fill = FALSE, 
                                                label = ~shortname, 
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
-        
-        # Clear info box - information is now in tooltip
-        output$infopt <- renderUI({
-          NULL
-        })
-      }
+      
+      # Clear info box - information is now in tooltip
+      output$infopt <- renderUI({
+        NULL
+      })
+    }
     
     # station click
     else if (startsWith(id, 'station')) {
@@ -1905,7 +1905,7 @@ server <- function(input, output, session) {
                                                layerId = ~id, 
                                                group = 'linesnear')
           else .}
-        
+      
       # Clear info box - information is now in tooltip
       output$infopt <- renderUI({
         NULL
@@ -1992,9 +1992,9 @@ server <- function(input, output, session) {
       ))
     }
   })
-
+  
   # --- PT Landmark Filter Logic ---
-
+  
   # Filtered POIs by type for PT tab
   filtered_pois_pt <- reactive({
     if (input$type == 'All') {
@@ -2003,12 +2003,12 @@ server <- function(input, output, session) {
       return(pois[pois$subtype == input$type, ])
     }
   })
-
+  
   # Update PT landmark choices when POI type changes
   observe({
     # Only update if we're on the Public Transport tab
     if (is.null(input$mypage) || input$mypage != "Public Transport") return()
-
+    
     filtered_pois <- filtered_pois_pt()
     updateSelectizeInput(
       session,
@@ -2017,23 +2017,23 @@ server <- function(input, output, session) {
       server = TRUE
     )
   })
-
+  
   # Selected landmarks for PT tab
   selected_landmarks_pt <- reactive({
     lm <- filtered_pois_pt()
     if (nrow(lm) == 0) return(lm)
-
+    
     if (length(input$lm_name_pt) > 0) {
       lm <- lm |> dplyr::filter(name %in% input$lm_name_pt)
     }
     lm
   })
-
+  
   # Combined buffer around selected PT landmarks
   combined_buffer_pt <- reactive({
     sel_lm <- selected_landmarks_pt()
     req(nrow(sel_lm) > 0)
-
+    
     # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
     lm_proj <- tryCatch({
       sf::st_transform(sel_lm, 7899)
@@ -2041,24 +2041,24 @@ server <- function(input, output, session) {
       message("EPSG:7899 not available, using EPSG:3857")
       sf::st_transform(sel_lm, 3857)
     })
-
+    
     # Create buffer around each landmark
     buf <- sf::st_buffer(lm_proj, dist = input$radius)
-
+    
     # Union all buffers into one
     if (nrow(buf) > 1) {
       buf <- sf::st_union(buf) |> sf::st_sf()
     }
-
+    
     sf::st_transform(buf, 4326)
   })
-
+  
   # Filter PT stops within radius
   stops_in_radius_pt <- reactive({
     req(nrow(selected_landmarks_pt()) > 0)
     buf <- combined_buffer_pt()
     req(nrow(buf) > 0)
-
+    
     # Spatial filter: stops that intersect with buffer
     if (nrow(stops) > 0) {
       intersects <- sf::st_intersects(stops, buf, sparse = FALSE)
@@ -2068,13 +2068,13 @@ server <- function(input, output, session) {
       return(stops[0, ])
     }
   })
-
+  
   # Filter PT stations within radius
   stations_in_radius_pt <- reactive({
     req(nrow(selected_landmarks_pt()) > 0)
     buf <- combined_buffer_pt()
     req(nrow(buf) > 0)
-
+    
     # Spatial filter: stations that intersect with buffer
     if (nrow(stations) > 0) {
       intersects <- sf::st_intersects(stations, buf, sparse = FALSE)
@@ -2084,34 +2084,34 @@ server <- function(input, output, session) {
       return(stations[0, ])
     }
   })
-
+  
   # Update map when PT landmarks are selected
   observeEvent(c(input$lm_name_pt, input$radius), {
     # Only update if we're on the Public Transport tab
     if (is.null(input$mypage) || input$mypage != "Public Transport") return()
     
     req(nrow(pois) > 0)
-
+    
     map <- leafletProxy("mappt")
     map <- clearGroup(map, "Buffer")
     map <- clearGroup(map, "Filtered Landmarks")
     map <- clearGroup(map, "Filtered Stops")
     map <- clearGroup(map, "Filtered Stations")
     map <- clearGroup(map, "linesnear")  # Clear route lines when landmarks change
-
+    
     # Check if user has filter active
     has_filter <- length(input$lm_name_pt) > 0
-
+    
     if (has_filter) {
       # User applied filter
       sel_lm <- selected_landmarks_pt()
       buf <- combined_buffer_pt()
       stops_sf <- stops_in_radius_pt()
       stations_sf <- stations_in_radius_pt()
-
+      
       # Hide "pois" group
       map <- hideGroup(map, "pois")
-
+      
       # Add buffer zone
       map <- addPolygons(
         map,
@@ -2122,18 +2122,18 @@ server <- function(input, output, session) {
         weight = 2,
         group = "Buffer"
       )
-
+      
       # Automatically pan and zoom to the selected landmarks
       if (nrow(sel_lm) > 0) {
         bounds <- sf::st_bbox(buf)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
-
+      
       # Add filtered landmarks (larger red markers)
       sel_lm_data <- sel_lm
       sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
-
+      
       map <- addCircleMarkers(
         map,
         data = sel_lm_data,
@@ -2148,10 +2148,10 @@ server <- function(input, output, session) {
         layerId = ~id,
         group = "Filtered Landmarks"
       )
-
+      
       # Show filtered landmarks
       map <- showGroup(map, "Filtered Landmarks")
-
+      
       # Add filtered PT stops
       if (nrow(stops_sf) > 0) {
         # Filter stops to only include those with routes and create popups
@@ -2215,7 +2215,7 @@ server <- function(input, output, session) {
           map <- showGroup(map, "Filtered Stops")
         }
       }
-
+      
       # Add filtered PT stations
       if (nrow(stations_sf) > 0) {
         # Create popups for stations with chart buttons
@@ -2266,7 +2266,7 @@ server <- function(input, output, session) {
         )
         map <- showGroup(map, "Filtered Stations")
       }
-
+      
     } else {
       # No filter applied - show "pois" group, hide filtered groups
       map <- hideGroup(map, "Filtered Landmarks")
@@ -2278,18 +2278,18 @@ server <- function(input, output, session) {
       if (nrow(boundary) > 0) {
         bounds <- sf::st_bbox(boundary)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
     }
   })
-
-
-
-# --- Pedestrian Visualisations ---
+  
+  
+  
+  # --- Pedestrian Visualisations ---
   
   # Heatmap View
   output$heatmap <- renderLeaflet({
-
+    
     # poi subset
     if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
@@ -2341,7 +2341,7 @@ server <- function(input, output, session) {
   
   # Ranking View
   output$popularity_plot <- renderPlotly({
-
+    
     # poi subset
     if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
@@ -2366,13 +2366,15 @@ server <- function(input, output, session) {
       labs(x = "Point of Interest", y = "Avg Pedestrian Count (nearest sensor)",
            title = "Top 15 POIs by Nearby Pedestrian Volume") +
       theme_minimal(base_size = 12) +
-      theme(legend.position = "bottom",
-            plot.title = element_text(size = 14, face = "bold", family = "Inter"),
-            text = element_text(family = "Inter", size = 12),
-            axis.text = element_text(family = "Inter", size = 12),
-            axis.title = element_text(family = "Inter", size = 12),
-            legend.text = element_text(family = "Inter", size = 12),
-            legend.title = element_text(family = "Inter", size = 12)) + 
+      theme(
+        legend.position = "bottom",
+        plot.title = element_text(size = 14, face = "bold", family = "Inter"),
+        text = element_text(family = "Inter", size = 12),
+        axis.text = element_text(family = "Inter", size = 12),
+        axis.title = element_text(family = "Inter", size = 12),
+        legend.text = element_text(family = "Inter", size = 12),
+        legend.title = element_text(family = "Inter", size = 12)
+      ) + 
       scale_fill_manual(values = colourvals, name = 'Type')
     
     ggplotly(p, tooltip = c("x", "y", "fill")) %>%
@@ -2389,29 +2391,37 @@ server <- function(input, output, session) {
         yaxis = list(
           title = list(text = "Point of Interest", font = list(family = "Inter", size = 12)),
           tickfont = list(family = "Inter", size = 12)
-        )
+        ),
+        legend = list(
+          orientation = "h",
+          y = -0.3,       # move legend below chart
+          x = 0.5,
+          xanchor = "center"
+        ),
+        margin = list(b = 120)   # add bottom space for legend
       )
   })
   
+  
   # Trend View (linked to theme filter)
   output$trend_plot <- renderPlotly({
-
+    
     # poi subset
     if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
     } else {
       filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
     }
-
+    
     selected_sensors <- filtered_landmarks$nearest_sensor
-
+    
     trend_theme <- ped_raw %>%
       filter(Sensor_Name %in% selected_sensors) %>%
       mutate(Date = as.Date(Sensing_Date)) %>%
       group_by(Date) %>%
       summarise(Total_Pedestrians = sum(Total_of_Directions, na.rm = TRUE)) %>%
       arrange(Date)
-
+    
     plot_ly(
       data = trend_theme,
       x = ~Date,
@@ -2424,7 +2434,7 @@ server <- function(input, output, session) {
       layout(
         title = list(
           text = paste0("Pedestrian Flow Over Time — ",
-                       ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
+                        ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
           font = list(family = "Inter", size = 14)
         ),
         xaxis = list(
@@ -2439,9 +2449,9 @@ server <- function(input, output, session) {
         font = list(family = "Inter", size = 12)
       )
   })
-
+  
   # --- Pedestrian Landmark Filter Logic ---
-
+  
   # Filtered POIs by type for Pedestrian tab
   filtered_pois_pedestrian <- reactive({
     if (input$type_pedestrian == 'All') {
@@ -2450,12 +2460,12 @@ server <- function(input, output, session) {
       return(pois[pois$subtype == input$type_pedestrian, ])
     }
   })
-
+  
   # Update Pedestrian landmark choices when POI type changes
   observe({
     # Only update if we're on the Pedestrian Counts tab
     if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
-
+    
     filtered_pois <- filtered_pois_pedestrian()
     updateSelectizeInput(
       session,
@@ -2464,23 +2474,23 @@ server <- function(input, output, session) {
       server = TRUE
     )
   })
-
+  
   # Selected landmarks for Pedestrian tab
   selected_landmarks_pedestrian <- reactive({
     lm <- filtered_pois_pedestrian()
     if (nrow(lm) == 0) return(lm)
-
+    
     if (length(input$lm_name_pedestrian) > 0) {
       lm <- lm |> dplyr::filter(name %in% input$lm_name_pedestrian)
     }
     lm
   })
-
+  
   # Combined buffer around selected Pedestrian landmarks
   combined_buffer_pedestrian <- reactive({
     sel_lm <- selected_landmarks_pedestrian()
     req(nrow(sel_lm) > 0)
-
+    
     # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
     lm_proj <- tryCatch({
       sf::st_transform(sel_lm, 7899)
@@ -2488,10 +2498,10 @@ server <- function(input, output, session) {
       message("EPSG:7899 not available, using EPSG:3857")
       sf::st_transform(sel_lm, 3857)
     })
-
+    
     # Create buffer around each landmark
     buf <- sf::st_buffer(lm_proj, dist = input$radius_pedestrian)
-
+    
     # Union all buffers into one
     if (nrow(buf) > 1) {
       buf <- sf::st_union(buf) |> sf::st_sf()
@@ -2501,16 +2511,16 @@ server <- function(input, output, session) {
         buf <- sf::st_sf(geometry = buf)
       }
     }
-
+    
     sf::st_transform(buf, 4326)
   })
-
+  
   # Filter pedestrian sensors within radius
   sensors_in_radius_pedestrian <- reactive({
     req(nrow(selected_landmarks_pedestrian()) > 0)
     buf <- combined_buffer_pedestrian()
     req(nrow(buf) > 0)
-
+    
     # Spatial filter: sensors that intersect with buffer
     if (nrow(ped_geo) > 0) {
       # Convert ped_geo to sf object if it's not already
@@ -2532,31 +2542,31 @@ server <- function(input, output, session) {
       return(ped_geo[0, ])
     }
   })
-
+  
   # Update heatmap when Pedestrian landmarks are selected
   observeEvent(c(input$lm_name_pedestrian, input$radius_pedestrian), {
     # Only update if we're on the Pedestrian Counts tab
     if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
     
     req(nrow(pois) > 0)
-
+    
     map <- leafletProxy("heatmap")
     map <- clearGroup(map, "Buffer")
     map <- clearGroup(map, "Filtered Landmarks")
     map <- clearGroup(map, "Filtered Sensors")
-
+    
     # Check if user has filter active
     has_filter <- length(input$lm_name_pedestrian) > 0
-
+    
     if (has_filter) {
       # User applied filter
       sel_lm <- selected_landmarks_pedestrian()
       buf <- combined_buffer_pedestrian()
       sensors_sf <- sensors_in_radius_pedestrian()
-
+      
       # Hide "pois" group (all landmarks) when filter is active
       map <- hideGroup(map, "pois")
-
+      
       # Add buffer zone
       map <- addPolygons(
         map,
@@ -2567,18 +2577,18 @@ server <- function(input, output, session) {
         weight = 2,
         group = "Buffer"
       )
-
+      
       # Automatically pan and zoom to the selected landmarks
       if (nrow(sel_lm) > 0) {
         bounds <- sf::st_bbox(buf)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
-
+      
       # Add filtered landmarks (larger red markers)
       sel_lm_data <- sel_lm
       sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
-
+      
       map <- addCircleMarkers(
         map,
         data = sel_lm_data,
@@ -2593,10 +2603,10 @@ server <- function(input, output, session) {
         layerId = ~id,
         group = "Filtered Landmarks"
       )
-
+      
       # Show filtered landmarks
       map <- showGroup(map, "Filtered Landmarks")
-
+      
       # Add filtered pedestrian sensors
       if (nrow(sensors_sf) > 0) {
         # Create formatted labels with HTML
@@ -2626,7 +2636,7 @@ server <- function(input, output, session) {
         )
         map <- showGroup(map, "Filtered Sensors")
       }
-
+      
     } else {
       # No filter applied - show default groups, hide filtered groups
       map <- hideGroup(map, "Filtered Landmarks")
@@ -2637,11 +2647,11 @@ server <- function(input, output, session) {
       if (nrow(boundary) > 0) {
         bounds <- sf::st_bbox(boundary)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
     }
   })
-
+  
   # Handle landmark marker clicks on Pedestrian heatmap
   observeEvent(input$heatmap_marker_click, {
     # Only process if we're on the Pedestrian Counts tab
@@ -2649,7 +2659,7 @@ server <- function(input, output, session) {
     
     click <- input$heatmap_marker_click
     if (is.null(click$id)) return()
-
+    
     # Check if clicked marker is a landmark (POIs start with 'poi')
     if (startsWith(click$id, 'poi')) {
       # Get landmark name from clicked POI
@@ -2679,9 +2689,9 @@ server <- function(input, output, session) {
       )
     }
   })
-
+  
   # --- Parking Visualisations ---
-
+  
   # Filtered POIs by type
   filtered_pois_parking <- reactive({
     if (input$type_parking == 'All') {
@@ -2690,12 +2700,12 @@ server <- function(input, output, session) {
       return(pois[pois$subtype == input$type_parking, ])
     }
   })
-
+  
   # Update landmark choices when POI type changes
   observe({
     # Only update if we're on the On-street Parking tab
     if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
-
+    
     filtered_pois <- filtered_pois_parking()
     updateSelectizeInput(
       session,
@@ -2704,23 +2714,23 @@ server <- function(input, output, session) {
       server = TRUE
     )
   })
-
+  
   # Selected landmarks (for parking search)
   selected_landmarks_parking <- reactive({
     lm <- filtered_pois_parking()
     if (nrow(lm) == 0) return(lm)
-
+    
     if (length(input$lm_name_parking) > 0) {
       lm <- lm |> dplyr::filter(name %in% input$lm_name_parking)
     }
     lm
   })
-
+  
   # Combined buffer around all selected landmarks
   combined_buffer_parking <- reactive({
     sel_lm <- selected_landmarks_parking()
     req(nrow(sel_lm) > 0)
-
+    
     # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
     # Falls back to 3857 if transformation fails
     lm_proj <- tryCatch({
@@ -2729,24 +2739,24 @@ server <- function(input, output, session) {
       message("EPSG:7899 not available, using EPSG:3857")
       sf::st_transform(sel_lm, 3857)
     })
-
+    
     # Create buffer around each landmark
     buf <- sf::st_buffer(lm_proj, dist = input$radius_m_parking)
-
+    
     # Union all buffers into one
     if (nrow(buf) > 1) {
       buf <- sf::st_union(buf) |> sf::st_sf()
     }
-
+    
     sf::st_transform(buf, 4326)
   })
-
+  
   # Filter zones by landmark buffer
   zones_in_radius_parking <- reactive({
     req(nrow(selected_landmarks_parking()) > 0)
     buf <- combined_buffer_parking()
     req(nrow(buf) > 0)
-
+    
     # Spatial filter: zones that intersect with buffer
     if (!is.null(zones_display) && nrow(zones_display) > 0) {
       intersects <- sf::st_intersects(zones_display, buf, sparse = FALSE)
@@ -2757,12 +2767,12 @@ server <- function(input, output, session) {
       return(data.frame(zone_id = character(0), sign_text = character(0)))
     }
   })
-
+  
   # Initial map with all landmarks shown
   output$map_parking <- renderLeaflet({
     map <- leaflet(options = leafletOptions(minZoom = 11)) |>
       addProviderTiles(providers$CartoDB.Positron)
-
+    
     if (nrow(boundary) > 0) {
       bb <- sf::st_bbox(boundary)
       map <- fitBounds(map,
@@ -2771,11 +2781,11 @@ server <- function(input, output, session) {
                        lng2 = as.numeric(bb["xmax"]),
                        lat2 = as.numeric(bb["ymax"]))
       map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
-                        fill = FALSE, group = "Boundary")
+                         fill = FALSE, group = "Boundary")
     } else {
       map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
     }
-
+    
     # Show filtered landmarks by default (small dark blue markers)
     filtered_pois <- filtered_pois_parking()
     if (nrow(filtered_pois) > 0) {
@@ -2791,7 +2801,7 @@ server <- function(input, output, session) {
         group = "All Landmarks"
       )
     }
-
+    
     # Show ALL parking zones and unmatched segments by default
     if (!is.null(zones_display) && nrow(zones_display) > 0) {
       # Add zones with zone IDs (red markers with clustering)
@@ -2799,7 +2809,7 @@ server <- function(input, output, session) {
       if (nrow(zones_with_ids) > 0) {
         # Create table popup for each zone using sign_plates data
         zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
-
+        
         map <- addAwesomeMarkers(
           map,
           data = zones_with_ids,
@@ -2819,13 +2829,13 @@ server <- function(input, output, session) {
           )
         )
       }
-
+      
       # Add unmatched segments (orange markers)
       unmatched <- zones_display |> dplyr::filter(has_zone == FALSE)
       if (nrow(unmatched) > 0) {
         # Create popup for unmatched segments
         unmatched <- create_unmatched_popups(unmatched)
-
+        
         map <- addAwesomeMarkers(
           map,
           data = unmatched,
@@ -2846,31 +2856,31 @@ server <- function(input, output, session) {
         )
       }
     }
-
+    
     # Add layer control
     map <- addLayersControl(
       map,
       overlayGroups = c("Boundary", "All Landmarks", "All Parking Zones", "Buffer"),
       options = layersControlOptions(collapsed = FALSE)
     )
-
+    
     # Initially hide filtered groups
     map <- hideGroup(map, "Filtered Landmarks")
     map <- hideGroup(map, "Filtered Zones")
-
+    
     map
   })
-
+  
   # Update landmarks on map when POI type changes
   observeEvent(input$type_parking, {
     # Only update if we're on the Parking tab
     if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
     
     filtered_pois <- filtered_pois_parking()
-
+    
     map <- leafletProxy("map_parking")
     map <- clearGroup(map, "All Landmarks")
-
+    
     if (nrow(filtered_pois) > 0) {
       map <- addCircleMarkers(
         map,
@@ -2885,7 +2895,7 @@ server <- function(input, output, session) {
       )
     }
   })
-
+  
   # Handle landmark marker clicks
   observeEvent(input$map_parking_marker_click, {
     # Only process if we're on the Parking tab
@@ -2893,7 +2903,7 @@ server <- function(input, output, session) {
     
     click <- input$map_parking_marker_click
     if (is.null(click$id)) return()
-
+    
     # Check if clicked marker is a landmark (not a parking zone)
     # Landmarks use their ID (poi1, poi2, etc.) as layerId, parking zones use "Zone XXX"
     if (!startsWith(click$id, "Zone ") && click$id != "No Zone ID") {
@@ -2924,7 +2934,7 @@ server <- function(input, output, session) {
       )
     }
   })
-
+  
   # Update map layers when landmarks are selected
   observeEvent(c(input$lm_name_parking, input$radius_m_parking), {
     # Only update if we're on the Parking tab
@@ -2932,28 +2942,28 @@ server <- function(input, output, session) {
     
     req(nrow(pois) > 0)
     req(!is.null(zones_display))
-
+    
     map <- leafletProxy("map_parking")
     map <- clearGroup(map, "Buffer")
     map <- clearGroup(map, "Filtered Landmarks")
     map <- clearGroup(map, "Filtered Zones")
-
+    
     # Check if user has filter active
     has_filter <- length(input$lm_name_parking) > 0
-
+    
     if (has_filter) {
       # User applied filter
       sel_lm <- selected_landmarks_parking()
       buf <- combined_buffer_parking()
       zones_sf <- zones_in_radius_parking()
-
+      
       # Hide "All" groups and uncheck their checkboxes
       map <- hideGroup(map, "All Landmarks")
       map <- hideGroup(map, "All Parking Zones")
-
+      
       # Send JavaScript command to uncheck the checkboxes
       session$sendCustomMessage(type = "uncheckLayers", message = list())
-
+      
       # Add buffer zones
       map <- addPolygons(
         map,
@@ -2964,18 +2974,18 @@ server <- function(input, output, session) {
         weight = 2,
         group = "Buffer"
       )
-
+      
       # Automatically pan and zoom to the selected landmarks
       if (nrow(sel_lm) > 0) {
         bounds <- sf::st_bbox(buf)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
-
+      
       # Add filtered landmarks (larger markers with their original colors)
       sel_lm_data <- sel_lm
       sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
-
+      
       map <- addCircleMarkers(
         map,
         data = sel_lm_data,
@@ -2989,10 +2999,10 @@ server <- function(input, output, session) {
         popup = ~popup_text,
         group = "Filtered Landmarks"
       )
-
+      
       # Show filtered landmarks
       map <- showGroup(map, "Filtered Landmarks")
-
+      
       # Add filtered parking zones
       if (nrow(zones_sf) > 0) {
         # Split into zones with IDs and unmatched segments
@@ -3002,11 +3012,11 @@ server <- function(input, output, session) {
           zones_with_ids <- zones_sf |> dplyr::filter(has_zone == TRUE)
           unmatched_segs <- zones_sf |> dplyr::filter(has_zone == FALSE)
         }
-
+        
         # Add zones with zone IDs (red markers)
         if (nrow(zones_with_ids) > 0) {
           zones_with_ids <- create_zone_popups_with_coords(zones_with_ids, sign_plates)
-
+          
           map <- addAwesomeMarkers(
             map,
             data = zones_with_ids,
@@ -3026,11 +3036,11 @@ server <- function(input, output, session) {
             )
           )
         }
-
+        
         # Add unmatched segments
         if (nrow(unmatched_segs) > 0) {
           unmatched_segs <- create_unmatched_popups(unmatched_segs)
-
+          
           map <- addAwesomeMarkers(
             map,
             data = unmatched_segs,
@@ -3050,18 +3060,18 @@ server <- function(input, output, session) {
             )
           )
         }
-
+        
         # Show filtered zones
         map <- showGroup(map, "Filtered Zones")
       }
-
+      
     } else {
       # No filter applied - show "All" groups, hide "Filtered" groups
       map <- hideGroup(map, "Filtered Landmarks")
       map <- hideGroup(map, "Filtered Zones")
       map <- showGroup(map, "All Landmarks")
       map <- showGroup(map, "All Parking Zones")
-
+      
       # Send JavaScript command to re-check the checkboxes
       session$sendCustomMessage(type = "recheckLayers", message = list())
       
@@ -3078,7 +3088,7 @@ server <- function(input, output, session) {
       }
     }
   })
-
+  
   # Summary info box
   output$info_summary_parking <- renderUI({
     if (length(input$lm_name_parking) == 0) {
@@ -3092,7 +3102,7 @@ server <- function(input, output, session) {
         )
       ))
     }
-
+    
     zones_sf <- zones_in_radius_parking()
     if (nrow(zones_sf) == 0) {
       return(tags$div(
@@ -3102,9 +3112,9 @@ server <- function(input, output, session) {
         sprintf("within %d meters of selected landmark(s). Try increasing the search radius or selecting landmarks in central Melbourne.", input$radius_m_parking)
       ))
     }
-
+    
     total_zones <- nrow(zones_sf)
-
+    
     # Format landmark names for display
     landmark_names <- input$lm_name_parking
     if (length(landmark_names) <= 3) {
@@ -3114,7 +3124,7 @@ server <- function(input, output, session) {
       # Show first 3 and add "etc."
       landmark_text <- paste(c(landmark_names[1:3], "etc."), collapse = ", ")
     }
-
+    
     tags$div(
       class = "alert alert-success",
       role = "alert",
@@ -3132,16 +3142,16 @@ server <- function(input, output, session) {
   
   
   # --- Crime Visualisations ---
-
+  
   # Crime Map Active State
   output$crime_map_active <- reactive({ TRUE })
   outputOptions(output, "crime_map_active", suspendWhenHidden = FALSE)
-
+  
   # Crime Map Data (reactive) - suburb-based crime data with geometries
   crime_suburb_data <- reactive({
     # Apply category filter - default to "all" if NULL or not set
     category_filter <- if (is.null(input$crime_category_filter)) "all" else input$crime_category_filter
-
+    
     # Filter raw data by category if a specific category is selected
     if (category_filter != "all") {
       filtered_data <- crime_data$table03 %>%
@@ -3157,7 +3167,7 @@ server <- function(input, output, session) {
     } else {
       filtered_data <- crime_data$table03
     }
-
+    
     # Get crime data by suburb - compute totals and category breakdowns
     crime_summary <- filtered_data %>%
       group_by(`Suburb/Town Name`) %>%
@@ -3192,7 +3202,7 @@ server <- function(input, output, session) {
     # Filter out suburbs with 0 offences for the selected category
     crime_summary <- crime_summary %>%
       filter(Display_Count > 0)
-
+    
     # Join with suburb geometries
     # Convert suburb names to uppercase to match the geometry data
     crime_with_geo <- melbourne_suburbs %>%
@@ -3204,10 +3214,10 @@ server <- function(input, output, session) {
       filter(!is.na(Display_Count)) %>%  # Only keep suburbs with crime data for selected category
       select(suburb_name, `Suburb/Town Name`, Total_Offences, Person_Crimes,
              Property_Crimes, Drug_Crimes, Public_Order, Display_Count, geometry)
-
+    
     crime_with_geo
   })
-
+  
   # Crime Map Output - Base map (renders once)
   output$crime_map <- renderLeaflet({
     # Get initial crime data with default filters
@@ -3260,9 +3270,9 @@ server <- function(input, output, session) {
       setView(lng = 144.9631, lat = -37.8136, zoom = 13) %>%
       # Add boundary (same as other tabs)
       addPolygons(data = boundary,
-                 color = 'black',
-                 weight = 3,
-                 fill = FALSE)
+                  color = 'black',
+                  weight = 3,
+                  fill = FALSE)
     
     # Add crime suburb polygons FIRST (so landmarks can be on top)
     # Add landmarks by default (on separate "All Landmarks" layer)
@@ -3355,14 +3365,14 @@ server <- function(input, output, session) {
     
     map
   })
-
+  
   # Initialize map when switching to Crime tab
   observeEvent(input$mypage, {
     if (!is.null(input$mypage) && input$mypage == "Security View") {
       # Use isolate to prevent reactive dependencies
       isolate({
         crime_suburbs <- crime_suburb_data()
-
+        
         if (nrow(crime_suburbs) > 0) {
           category_name <- if (!is.null(input$crime_category_filter)) {
             switch(input$crime_category_filter,
@@ -3380,7 +3390,7 @@ server <- function(input, output, session) {
       })
     }
   }, ignoreInit = FALSE)
-
+  
   # Define the update function
   updateCrimeMap <- function(crime_suburbs, category_name) {
     # Create color palette
@@ -3390,7 +3400,7 @@ server <- function(input, output, session) {
         domain = crime_suburbs$Display_Count
       )
     }
-
+    
     # Get filtered POIs based on current input
     if (is.null(input$type_crime) || input$type_crime == 'All') {
       filtered_pois_by_type <- pois
@@ -3479,14 +3489,14 @@ server <- function(input, output, session) {
             ),
             group = 'Crime Suburbs'
           ) %>%
-          addLegend(
-            "bottomleft",
-            pal = pal,
-            values = crime_suburbs$Display_Count,
-            title = paste(category_name, "<br/>Offence Count"),
-            opacity = 0.7,
-            layerId = "crime_legend"
-          )
+            addLegend(
+              "bottomleft",
+              pal = pal,
+              values = crime_suburbs$Display_Count,
+              title = paste(category_name, "<br/>Offence Count"),
+              opacity = 0.7,
+              layerId = "crime_legend"
+            )
         } else {
           .
         }
@@ -3496,7 +3506,7 @@ server <- function(input, output, session) {
         if (nrow(filtered_pois_to_add) > 0) {
           filtered_pois_popup <- filtered_pois_to_add
           filtered_pois_popup$popup_text <- paste0("<b>", filtered_pois_popup$name, "</b><br>Category: ", filtered_pois_popup$subtype)
-
+          
           if (has_landmark_filter) {
             addCircleMarkers(
               .,
@@ -3514,8 +3524,8 @@ server <- function(input, output, session) {
               group = landmark_group,
               options = markerOptions(zIndexOffset = 1000)  # Put markers on top
             ) %>%
-            hideGroup("All Landmarks") %>%
-            showGroup("Filtered Landmarks")
+              hideGroup("All Landmarks") %>%
+              showGroup("Filtered Landmarks")
           } else {
             addCircleMarkers(
               .,
@@ -3532,15 +3542,15 @@ server <- function(input, output, session) {
               group = landmark_group,
               options = markerOptions(zIndexOffset = 1000)  # Put markers on top
             ) %>%
-            showGroup("All Landmarks") %>%
-            hideGroup("Filtered Landmarks")
+              showGroup("All Landmarks") %>%
+              hideGroup("Filtered Landmarks")
           }
         } else {
           .
         }
       }
-    }
-
+  }
+  
   # --- Crime Tab Landmark Filtering Logic ---
   
   # Filtered POIs by type for crime tab
@@ -3551,12 +3561,12 @@ server <- function(input, output, session) {
       return(pois[pois$subtype == input$type_crime, ])
     }
   })
-
+  
   # Update landmark choices when POI type changes
   observe({
     # Only update if we're on the Security View tab
     if (is.null(input$mypage) || input$mypage != "Security View") return()
-
+    
     filtered_pois <- filtered_pois_crime()
     updateSelectizeInput(
       session,
@@ -3618,7 +3628,7 @@ server <- function(input, output, session) {
         # Automatically pan and zoom to the selected landmarks
         bounds <- sf::st_bbox(sel_lm)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
     } else {
       # No filter - show all landmarks of the selected type
@@ -3633,7 +3643,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-                    fillOpacity = 1.0,
+          fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3762,7 +3772,7 @@ server <- function(input, output, session) {
         # Automatically pan and zoom to the selected landmarks
         bounds <- sf::st_bbox(sel_lm)
         map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                        options = list(padding = c(50, 50)))
+                         options = list(padding = c(50, 50)))
       }
     } else {
       # No filter - show all landmarks based on POI type
@@ -3778,7 +3788,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-                    fillOpacity = 1.0,
+          fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3799,7 +3809,7 @@ server <- function(input, output, session) {
     # Only update if we're on the Crime tab
     if (!is.null(input$mypage) && input$mypage == "Security View") {
       crime_suburbs <- crime_suburb_data()
-
+      
       # Only update if we have data
       if (nrow(crime_suburbs) > 0) {
         # Get category name for display
@@ -3814,13 +3824,13 @@ server <- function(input, output, session) {
         } else {
           "All Offences"
         }
-
+        
         # Call the update function
         updateCrimeMap(crime_suburbs, category_name)
       }
     }
   }, ignoreNULL = FALSE)
-
+  
   # Crime Map Summary Table
   output$crime_map_table <- renderDT({
     # Get suburb-level summary from the crime data
@@ -3835,9 +3845,9 @@ server <- function(input, output, session) {
         .groups = 'drop'
       ) %>%
       arrange(desc(Total_Offences))
-
+    
     # No minimum filter - show all suburbs
-
+    
     datatable(
       crime_suburb_summary,
       options = list(pageLength = 10, scrollX = TRUE),
@@ -3852,7 +3862,7 @@ server <- function(input, output, session) {
         backgroundPosition = 'center'
       )
   })
-
+  
   # Overview - Custom info boxes (replacing valueBox for navbarPage compatibility)
   output$total_offences <- renderUI({
     total <- sum(crime_data$table01$`Offence Count`, na.rm = TRUE)
@@ -3863,7 +3873,7 @@ server <- function(input, output, session) {
       tags$p("Total Offences", style = "margin: 3px 0 0 0; color: #721c24; font-size: 12px;")
     )
   })
-
+  
   output$crime_rate <- renderUI({
     rate <- mean(crime_data$table01$`Rate per 100,000 population`, na.rm = TRUE)
     tags$div(
@@ -3890,7 +3900,7 @@ server <- function(input, output, session) {
   output$overview_summary <- renderPrint({
     summary(crime_data$table01)
   })
-
+  
   
   # Offence Categories
   # Note: Using table03 instead of table02 because table02 doesn't have suburb information
@@ -4041,8 +4051,8 @@ server <- function(input, output, session) {
       
       if (nrow(location_data) == 0 || !input$location_level %in% names(location_data)) {
         return(plot_ly() %>% 
-               layout(title = paste("No data available for", input$location_level),
-                      xaxis = list(title = ""), yaxis = list(title = "")))
+                 layout(title = paste("No data available for", input$location_level),
+                        xaxis = list(title = ""), yaxis = list(title = "")))
       }
       
       location_summary <- location_data %>%
@@ -4053,8 +4063,8 @@ server <- function(input, output, session) {
       
       if (nrow(location_summary) == 0) {
         return(plot_ly() %>% 
-               layout(title = paste("No offences found for", input$location_level),
-                      xaxis = list(title = ""), yaxis = list(title = "")))
+                 layout(title = paste("No offences found for", input$location_level),
+                        xaxis = list(title = ""), yaxis = list(title = "")))
       }
       
       # Note: Location data is shown for all suburbs since table04 doesn't have suburb breakdown
@@ -4070,8 +4080,8 @@ server <- function(input, output, session) {
       plot_ly() %>% 
         layout(title = "Error loading location data",
                annotations = list(text = paste("Error:", conditionMessage(e)),
-                                x = 0.5, y = 0.5, xref = "paper", yref = "paper",
-                                showarrow = FALSE),
+                                  x = 0.5, y = 0.5, xref = "paper", yref = "paper",
+                                  showarrow = FALSE),
                xaxis = list(title = ""), yaxis = list(title = ""))
     })
   })
@@ -4087,8 +4097,8 @@ server <- function(input, output, session) {
       
       if (nrow(location_data) == 0 || !all(required_cols %in% names(location_data))) {
         return(plot_ly() %>% 
-               layout(title = "No location data available",
-                      xaxis = list(title = ""), yaxis = list(title = "")))
+                 layout(title = "No location data available",
+                        xaxis = list(title = ""), yaxis = list(title = "")))
       }
       
       level1 <- location_data %>%
@@ -4115,8 +4125,8 @@ server <- function(input, output, session) {
       
       if (nrow(sunburst_data) == 0) {
         return(plot_ly() %>% 
-               layout(title = "No location data to display",
-                      xaxis = list(title = ""), yaxis = list(title = "")))
+                 layout(title = "No location data to display",
+                        xaxis = list(title = ""), yaxis = list(title = "")))
       }
       
       # Note: Location data is shown for all suburbs since table04 doesn't have suburb breakdown
@@ -4127,19 +4137,19 @@ server <- function(input, output, session) {
       
       plot_ly(sunburst_data, labels = ~labels, parents = ~parents, values = ~Total,
               type = 'sunburst', branchvalues = 'total') %>%
-               layout(
-                 title = list(
-                   text = title_text,
-                   font = list(family = "Inter", size = 12)
-                 ),
-                 font = list(family = "Inter", size = 12)
-               )
+        layout(
+          title = list(
+            text = title_text,
+            font = list(family = "Inter", size = 12)
+          ),
+          font = list(family = "Inter", size = 12)
+        )
     }, error = function(e) {
       plot_ly() %>% 
         layout(title = "Error loading location hierarchy",
                annotations = list(text = paste("Error:", conditionMessage(e)),
-                               x = 0.5, y = 0.5, xref = "paper", yref = "paper",
-                               showarrow = FALSE),
+                                  x = 0.5, y = 0.5, xref = "paper", yref = "paper",
+                                  showarrow = FALSE),
                xaxis = list(title = ""), yaxis = list(title = ""))
     })
   })
@@ -4172,10 +4182,10 @@ server <- function(input, output, session) {
                                        sum(crime_data$table05$`Offence Count`, na.rm = TRUE) * 100, 2))
     datatable(investigation_data, 
               options = list(pageLength = 100, scrollX = TRUE, 
-                            lengthMenu = FALSE,
-                            paging = FALSE,
-                            info = FALSE,
-                            dom = 't'),  # 't' = table only (no info, no pagination)
+                             lengthMenu = FALSE,
+                             paging = FALSE,
+                             info = FALSE,
+                             dom = 't'),  # 't' = table only (no info, no pagination)
               rownames = FALSE)
   })
   
@@ -4235,7 +4245,7 @@ server <- function(input, output, session) {
               ), 
               rownames = FALSE,
               width = "100%"
-            )
+    )
   })
   
   # --- Melbourne Crime Navigation Logic ---
@@ -4450,4 +4460,4 @@ server <- function(input, output, session) {
   
 }
 
-shinyApp(ui, server)
+shinyApp(ui, server, options=list(port=6245))
