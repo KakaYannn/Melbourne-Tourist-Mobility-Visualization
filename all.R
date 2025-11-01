@@ -1202,25 +1202,37 @@ ui <- navbarPage(
   
   # --- PT Tab ---
   tabPanel(
-    title = 'Public Transport', 
+    title = 'Public Transport',
     sidebarLayout(
       sidebarPanel(
         selectInput(
-          inputId = 'type', 
-          label = 'POI Type', 
-          choices = c('All', unique(pois$subtype)), 
+          inputId = 'type',
+          label = 'POI Type',
+          choices = c('All', unique(pois$subtype)),
           selected = 'All'
-        ), 
+        ),
+        h4("Select Landmarks to Find Nearby Transport"),
+        helpText("Choose one or more landmarks to find nearby PT stops and stations"),
+        selectizeInput(
+          "lm_name_pt",
+          "Landmark(s)",
+          choices = NULL,
+          options = list(
+            placeholder = "Type to search...",
+            plugins = list('remove_button')
+          ),
+          multiple = TRUE
+        ),
         sliderInput(
-          inputId = 'radius', 
-          label = 'Search Radius (Metres): ', 
-          min = 0, 
-          max = 2000, 
-          value = 500, 
-          step = 50, 
+          inputId = 'radius',
+          label = 'Search Radius (Metres): ',
+          min = 0,
+          max = 2000,
+          value = 500,
+          step = 50,
           ticks = FALSE
-        ), 
-        width = 3, 
+        ),
+        width = 3,
         style = 'max-width: 400px'
       ), 
       mainPanel(
@@ -1240,18 +1252,39 @@ ui <- navbarPage(
     sidebarLayout(
       sidebarPanel(
         selectInput(
-          inputId = 'type', 
-          label = 'POI Type', 
-          choices = c('All', unique(pois$subtype)), 
+          inputId = 'type_pedestrian',
+          label = 'POI Type',
+          choices = c('All', unique(pois$subtype)),
           selected = 'All'
-        ), 
+        ),
+        h4("Select Landmarks to Find Nearby Sensors"),
+        helpText("Choose one or more landmarks to find nearby pedestrian sensors"),
+        selectizeInput(
+          "lm_name_pedestrian",
+          "Landmark(s)",
+          choices = NULL,
+          options = list(
+            placeholder = "Type to search...",
+            plugins = list('remove_button')
+          ),
+          multiple = TRUE
+        ),
+        sliderInput(
+          inputId = 'radius_pedestrian',
+          label = 'Search Radius (Metres): ',
+          min = 100,
+          max = 1000,
+          value = 300,
+          step = 50,
+          ticks = TRUE
+        ),
         hr(),
         h5("View Mode:"),
         tabsetPanel(id = "view_mode",
                     tabPanel("Heatmap View", value = "heatmap"),
                     tabPanel("Ranking View", value = "ranking"),
                     tabPanel("Trend View", value = "trend")),   # ✅ New tab
-        width = 3, 
+        width = 3,
         style = 'max-width: 400px'
       ),
       mainPanel(
@@ -1717,19 +1750,214 @@ server <- function(input, output, session) {
       })
     }
   })
-    
-    
-    
+
+  # --- PT Landmark Filter Logic ---
+
+  # Filtered POIs by type for PT tab
+  filtered_pois_pt <- reactive({
+    if (input$type == 'All') {
+      return(pois)
+    } else {
+      return(pois[pois$subtype == input$type, ])
+    }
+  })
+
+  # Update PT landmark choices when POI type changes
+  observe({
+    filtered_pois <- filtered_pois_pt()
+    updateSelectizeInput(
+      session,
+      "lm_name_pt",
+      choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
+      selected = character(0)
+    )
+  })
+
+  # Selected landmarks for PT tab
+  selected_landmarks_pt <- reactive({
+    lm <- filtered_pois_pt()
+    if (nrow(lm) == 0) return(lm)
+
+    if (length(input$lm_name_pt) > 0) {
+      lm <- lm |> dplyr::filter(name %in% input$lm_name_pt)
+    }
+    lm
+  })
+
+  # Combined buffer around selected PT landmarks
+  combined_buffer_pt <- reactive({
+    sel_lm <- selected_landmarks_pt()
+    req(nrow(sel_lm) > 0)
+
+    # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
+    lm_proj <- tryCatch({
+      sf::st_transform(sel_lm, 7899)
+    }, error = function(e) {
+      message("EPSG:7899 not available, using EPSG:3857")
+      sf::st_transform(sel_lm, 3857)
+    })
+
+    # Create buffer around each landmark
+    buf <- sf::st_buffer(lm_proj, dist = input$radius)
+
+    # Union all buffers into one
+    if (nrow(buf) > 1) {
+      buf <- sf::st_union(buf) |> sf::st_sf()
+    }
+
+    sf::st_transform(buf, 4326)
+  })
+
+  # Filter PT stops within radius
+  stops_in_radius_pt <- reactive({
+    req(nrow(selected_landmarks_pt()) > 0)
+    buf <- combined_buffer_pt()
+    req(nrow(buf) > 0)
+
+    # Spatial filter: stops that intersect with buffer
+    if (nrow(stops) > 0) {
+      intersects <- sf::st_intersects(stops, buf, sparse = FALSE)
+      stops_filtered <- stops[as.vector(intersects), ]
+      return(stops_filtered)
+    } else {
+      return(stops[0, ])
+    }
+  })
+
+  # Filter PT stations within radius
+  stations_in_radius_pt <- reactive({
+    req(nrow(selected_landmarks_pt()) > 0)
+    buf <- combined_buffer_pt()
+    req(nrow(buf) > 0)
+
+    # Spatial filter: stations that intersect with buffer
+    if (nrow(stations) > 0) {
+      intersects <- sf::st_intersects(stations, buf, sparse = FALSE)
+      stations_filtered <- stations[as.vector(intersects), ]
+      return(stations_filtered)
+    } else {
+      return(stations[0, ])
+    }
+  })
+
+  # Update map when PT landmarks are selected
+  observeEvent(c(input$lm_name_pt, input$radius), {
+    req(nrow(pois) > 0)
+
+    map <- leafletProxy("mappt")
+    map <- clearGroup(map, "Buffer")
+    map <- clearGroup(map, "Filtered Landmarks")
+    map <- clearGroup(map, "Filtered Stops")
+    map <- clearGroup(map, "Filtered Stations")
+
+    # Check if user has filter active
+    has_filter <- length(input$lm_name_pt) > 0
+
+    if (has_filter) {
+      # User applied filter
+      sel_lm <- selected_landmarks_pt()
+      buf <- combined_buffer_pt()
+      stops_sf <- stops_in_radius_pt()
+      stations_sf <- stations_in_radius_pt()
+
+      # Hide "pois" group
+      map <- hideGroup(map, "pois")
+
+      # Add buffer zone
+      map <- addPolygons(
+        map,
+        data = buf,
+        fill = TRUE,
+        fillOpacity = 0.08,
+        color = "#1f78b4",
+        weight = 2,
+        group = "Buffer"
+      )
+
+      # Automatically pan and zoom to the selected landmarks
+      if (nrow(sel_lm) > 0) {
+        bounds <- sf::st_bbox(buf)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
+      }
+
+      # Add filtered landmarks (larger red markers)
+      sel_lm_data <- sel_lm
+      sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
+
+      map <- addCircleMarkers(
+        map,
+        data = sel_lm_data,
+        radius = 8,
+        stroke = TRUE,
+        weight = 2,
+        fillOpacity = 0.9,
+        fillColor = "#e31a1c",
+        color = "#fff",
+        label = ~name,
+        popup = ~popup_text,
+        layerId = ~id,
+        group = "Filtered Landmarks"
+      )
+
+      # Show filtered landmarks
+      map <- showGroup(map, "Filtered Landmarks")
+
+      # Add filtered PT stops
+      if (nrow(stops_sf) > 0) {
+        map <- addAwesomeMarkers(
+          map,
+          data = stops_sf,
+          lng = ~lon, lat = ~lat,
+          icon = ~awesomeIcons(library = 'fa',
+                               markerColor = ~colour,
+                               icon = ~icon,
+                               iconColor = '#ffffff'),
+          label = ~name,
+          layerId = ~id,
+          group = 'Filtered Stops'
+        )
+        map <- showGroup(map, "Filtered Stops")
+      }
+
+      # Add filtered PT stations
+      if (nrow(stations_sf) > 0) {
+        map <- addAwesomeMarkers(
+          map,
+          data = stations_sf,
+          lng = ~lon, lat = ~lat,
+          icon = ~awesomeIcons(library = 'fa',
+                               markerColor = ~colour,
+                               icon = ~icon,
+                               iconColor = '#ffffff'),
+          label = ~station,
+          layerId = ~id,
+          group = 'Filtered Stations'
+        )
+        map <- showGroup(map, "Filtered Stations")
+      }
+
+    } else {
+      # No filter applied - show "pois" group, hide filtered groups
+      map <- hideGroup(map, "Filtered Landmarks")
+      map <- hideGroup(map, "Filtered Stops")
+      map <- hideGroup(map, "Filtered Stations")
+      map <- showGroup(map, "pois")
+    }
+  })
+
+
+
 # --- Pedestrian Visualisations ---
   
   # Heatmap View
   output$heatmap <- renderLeaflet({
-    
+
     # poi subset
-    if (input$type == 'All') {
+    if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
     } else {
-      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type, ]
+      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
     }
     
     leaflet() %>%
@@ -1776,12 +2004,12 @@ server <- function(input, output, session) {
   
   # Ranking View
   output$popularity_plot <- renderPlotly({
-    
+
     # poi subset
-    if (input$type == 'All') {
+    if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
     } else {
-      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type, ]
+      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
     }
     
     df <- filtered_landmarks %>%
@@ -1809,23 +2037,23 @@ server <- function(input, output, session) {
   
   # Trend View (linked to theme filter)
   output$trend_plot <- renderPlotly({
-    
+
     # poi subset
-    if (input$type == 'All') {
+    if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
     } else {
-      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type, ]
+      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
     }
-    
+
     selected_sensors <- filtered_landmarks$nearest_sensor
-    
+
     trend_theme <- ped_raw %>%
       filter(Sensor_Name %in% selected_sensors) %>%
       mutate(Date = as.Date(Sensing_Date)) %>%
       group_by(Date) %>%
       summarise(Total_Pedestrians = sum(Total_of_Directions, na.rm = TRUE)) %>%
       arrange(Date)
-    
+
     plot_ly(
       data = trend_theme,
       x = ~Date,
@@ -1837,15 +2065,175 @@ server <- function(input, output, session) {
     ) %>%
       layout(
         title = paste0("Pedestrian Flow Over Time — ",
-                       ifelse(input$type == "All", "All POIs", input$type)),
+                       ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
         xaxis = list(title = "Date"),
         yaxis = list(title = "Total Pedestrians"),
         hovermode = "x unified"
       )
   })
-    
-    
-  
+
+  # --- Pedestrian Landmark Filter Logic ---
+
+  # Filtered POIs by type for Pedestrian tab
+  filtered_pois_pedestrian <- reactive({
+    if (input$type_pedestrian == 'All') {
+      return(pois)
+    } else {
+      return(pois[pois$subtype == input$type_pedestrian, ])
+    }
+  })
+
+  # Update Pedestrian landmark choices when POI type changes
+  observe({
+    filtered_pois <- filtered_pois_pedestrian()
+    updateSelectizeInput(
+      session,
+      "lm_name_pedestrian",
+      choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
+      selected = character(0)
+    )
+  })
+
+  # Selected landmarks for Pedestrian tab
+  selected_landmarks_pedestrian <- reactive({
+    lm <- filtered_pois_pedestrian()
+    if (nrow(lm) == 0) return(lm)
+
+    if (length(input$lm_name_pedestrian) > 0) {
+      lm <- lm |> dplyr::filter(name %in% input$lm_name_pedestrian)
+    }
+    lm
+  })
+
+  # Combined buffer around selected Pedestrian landmarks
+  combined_buffer_pedestrian <- reactive({
+    sel_lm <- selected_landmarks_pedestrian()
+    req(nrow(sel_lm) > 0)
+
+    # use EPSG:7899 (GDA2020 / MGA zone 55) for accurate meter-based buffering in Melbourne
+    lm_proj <- tryCatch({
+      sf::st_transform(sel_lm, 7899)
+    }, error = function(e) {
+      message("EPSG:7899 not available, using EPSG:3857")
+      sf::st_transform(sel_lm, 3857)
+    })
+
+    # Create buffer around each landmark
+    buf <- sf::st_buffer(lm_proj, dist = input$radius_pedestrian)
+
+    # Union all buffers into one
+    if (nrow(buf) > 1) {
+      buf <- sf::st_union(buf) |> sf::st_sf()
+    }
+
+    sf::st_transform(buf, 4326)
+  })
+
+  # Filter pedestrian sensors within radius
+  sensors_in_radius_pedestrian <- reactive({
+    req(nrow(selected_landmarks_pedestrian()) > 0)
+    buf <- combined_buffer_pedestrian()
+    req(nrow(buf) > 0)
+
+    # Spatial filter: sensors that intersect with buffer
+    if (nrow(ped_geo) > 0) {
+      intersects <- sf::st_intersects(ped_geo, buf, sparse = FALSE)
+      sensors_filtered <- ped_geo[as.vector(intersects), ]
+      return(sensors_filtered)
+    } else {
+      return(ped_geo[0, ])
+    }
+  })
+
+  # Update heatmap when Pedestrian landmarks are selected
+  observeEvent(c(input$lm_name_pedestrian, input$radius_pedestrian), {
+    req(nrow(pois) > 0)
+
+    map <- leafletProxy("heatmap")
+    map <- clearGroup(map, "Buffer")
+    map <- clearGroup(map, "Filtered Landmarks")
+    map <- clearGroup(map, "Filtered Sensors")
+
+    # Check if user has filter active
+    has_filter <- length(input$lm_name_pedestrian) > 0
+
+    if (has_filter) {
+      # User applied filter
+      sel_lm <- selected_landmarks_pedestrian()
+      buf <- combined_buffer_pedestrian()
+      sensors_sf <- sensors_in_radius_pedestrian()
+
+      # Hide "Landmarks" group
+      map <- hideGroup(map, "Landmarks")
+
+      # Add buffer zone
+      map <- addPolygons(
+        map,
+        data = buf,
+        fill = TRUE,
+        fillOpacity = 0.08,
+        color = "#1f78b4",
+        weight = 2,
+        group = "Buffer"
+      )
+
+      # Automatically pan and zoom to the selected landmarks
+      if (nrow(sel_lm) > 0) {
+        bounds <- sf::st_bbox(buf)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                        options = list(padding = c(50, 50)))
+      }
+
+      # Add filtered landmarks (larger red markers)
+      sel_lm_data <- sel_lm
+      sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
+
+      map <- addCircleMarkers(
+        map,
+        data = sel_lm_data,
+        radius = 8,
+        stroke = TRUE,
+        weight = 2,
+        fillOpacity = 0.9,
+        fillColor = "#e31a1c",
+        color = "#fff",
+        label = ~name,
+        popup = ~popup_text,
+        layerId = ~id,
+        group = "Filtered Landmarks"
+      )
+
+      # Show filtered landmarks
+      map <- showGroup(map, "Filtered Landmarks")
+
+      # Add filtered pedestrian sensors
+      if (nrow(sensors_sf) > 0) {
+        map <- addCircleMarkers(
+          map,
+          data = sensors_sf,
+          lng = ~lon, lat = ~lat,
+          radius = ~scales::rescale(Avg_Count, to = c(3, 15)),
+          stroke = TRUE,
+          weight = 1,
+          color = "#333333",
+          fillOpacity = 0.6,
+          fillColor = ~colorNumeric(palette = "YlOrRd", domain = ped_geo$Avg_Count)(Avg_Count),
+          label = ~paste0(Sensor_Name, ": ", format(Avg_Count, big.mark = ",")),
+          group = "Filtered Sensors"
+        )
+        map <- showGroup(map, "Filtered Sensors")
+      }
+
+    } else {
+      # No filter applied - show default groups, hide filtered groups
+      map <- hideGroup(map, "Filtered Landmarks")
+      map <- hideGroup(map, "Filtered Sensors")
+      map <- showGroup(map, "Landmarks")
+    }
+  })
+
+
+
   # --- Parking Visualisations ---
 
   # Filtered POIs by type
@@ -2401,6 +2789,12 @@ server <- function(input, output, session) {
           color = "#666666",
           opacity = 0.7,
           dashArray = "5, 5",
+          label = ~suburb_name,  # Show suburb name on hover
+          labelOptions = labelOptions(
+            textsize = "12px",
+            direction = "auto",
+            style = list("font-weight" = "bold")
+          ),
           options = pathOptions(zIndex = 100),  # Lower z-index so landmarks can be clicked
           highlight = highlightOptions(
             weight = 1.5,
@@ -2559,6 +2953,12 @@ server <- function(input, output, session) {
             color = "#666666",
             opacity = 0.7,
             dashArray = "5, 5",
+            label = ~suburb_name,  # Show suburb name on hover
+            labelOptions = labelOptions(
+              textsize = "12px",
+              direction = "auto",
+              style = list("font-weight" = "bold")
+            ),
             options = pathOptions(zIndex = 100),  # Lower z-index so landmarks can be clicked
             highlight = highlightOptions(
               weight = 1.5,
