@@ -630,6 +630,13 @@ load_suburb_boundaries <- function() {
     return(suburbs_all)
   }
   
+  # Option 4: Try backup file if main file doesn't exist
+  if (file.exists('vic_suburbs.geojson.backup')) {
+    suburbs_all <- st_read('vic_suburbs.geojson.backup', quiet = TRUE) %>%
+      st_transform(4326)
+    return(suburbs_all)
+  }
+  
   stop("No suburb boundary data source available.\n",
        "Please install osmdata package for accurate boundaries:\n",
        "  install.packages('osmdata')\n",
@@ -680,11 +687,11 @@ if ("suburb_name" %in% names(suburbs_all)) {
 # Apply flexible matching
 melbourne_suburbs_raw <- suburbs_all %>%
   mutate(
-    name_upper = toupper(.data[[name_col]]),
-    matches = sapply(.data[[name_col]], function(x) match_suburb_name(x, melbourne_suburb_names))
+    name_upper = toupper(!!sym(name_col)),
+    matches = sapply(!!sym(name_col), function(x) match_suburb_name(x, melbourne_suburb_names))
   ) %>%
   filter(matches) %>%
-  rename(suburb_name = .data[[name_col]]) %>%
+  rename(suburb_name = !!sym(name_col)) %>%
   select(suburb_name, geometry) %>%
   # Normalize suburb names to match crime data
   mutate(suburb_name = case_when(
@@ -1096,7 +1103,12 @@ ui <- navbarPage(
   header = tags$head(
     tags$style(HTML("
       * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      }
+      /* Preserve Font Awesome icon fonts */
+      .fa, .fas, .far, .fal, .fab, .fa-solid, .fa-regular, .fa-light, .fa-brands,
+      [class*='fa-'], [class^='fa-'] {
+        font-family: 'Font Awesome 5 Free', 'Font Awesome 5 Pro', 'Font Awesome 5 Brands', 'FontAwesome' !important;
       }
       body {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
@@ -1124,6 +1136,12 @@ ui <- navbarPage(
       .leaflet-container {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
       }
+      /* Preserve Font Awesome in Leaflet markers */
+      .leaflet-container .fa, .leaflet-container .fas, .leaflet-container .far, 
+      .leaflet-container .fal, .leaflet-container .fab,
+      .leaflet-container [class*='fa-'], .leaflet-container [class^='fa-'] {
+        font-family: 'Font Awesome 5 Free', 'Font Awesome 5 Pro', 'Font Awesome 5 Brands', 'FontAwesome' !important;
+      }
       .irs-grid-text, .leaflet-control {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
       }
@@ -1146,6 +1164,18 @@ ui <- navbarPage(
       }
       .tab-content {
         padding: 15px 0;
+      }
+      #crime_tabs .nav-tabs > li > a {
+        color: #000000;
+      }
+      #crime_tabs .nav-tabs > li.active > a {
+        color: #28a745;
+      }
+      #crime_tabs .nav-tabs > li.active > a:hover {
+        color: #28a745;
+      }
+      #crime_tabs .nav-tabs > li > a:hover {
+        color: #000000;
       }
     "))
   ),
@@ -1191,75 +1221,12 @@ ui <- navbarPage(
         uiOutput('infopt')
       )
     )
-  ), 
-  
-  
-  
-  # --- Pedestrian Tab ---
-  tabPanel(
-    title = 'Pedestrian Counts',
-    sidebarLayout(
-      sidebarPanel(
-        selectInput(
-          inputId = 'type_pedestrian',
-          label = 'POI Type',
-          choices = c('All', unique(pois$subtype)),
-          selected = 'All'
-        ),
-        h4("Select Landmarks to Find Nearby Sensors"),
-        helpText("Choose one or more landmarks to find nearby pedestrian sensors"),
-        selectizeInput(
-          "lm_name_pedestrian",
-          "Landmark(s)",
-          choices = NULL,
-          options = list(
-            placeholder = "Type to search...",
-            plugins = list('remove_button')
-          ),
-          multiple = TRUE
-        ),
-        sliderInput(
-          inputId = 'radius_pedestrian',
-          label = 'Search Radius (Metres): ',
-          min = 100,
-          max = 1000,
-          value = 300,
-          step = 50,
-          ticks = TRUE
-        ),
-        width = 3,
-        style = 'max-width: 400px'
-      ),
-      mainPanel(
-        tabsetPanel(
-          id = "view_mode",
-          type = "tabs",
-          selected = "heatmap",
-          tabPanel(
-            "Heatmap View",
-            value = "heatmap",
-            leafletOutput("heatmap", width = "100%", height = 600)
-          ),
-          tabPanel(
-            "Ranking View",
-            value = "ranking",
-            plotlyOutput("popularity_plot", width = "100%", height = 600)
-          ),
-          tabPanel(
-            "Trend View",
-            value = "trend",
-            plotlyOutput("trend_plot", width = "100%", height = 600)
-          )
-        )
-      )
-    )
-  ), 
-  
+  ),
   
   
   # --- Parking Tab ---
   tabPanel(
-    title = 'Parking Locations',
+    title = 'On-street Parking',
     sidebarLayout(
       sidebarPanel(
         selectInput(
@@ -1371,47 +1338,143 @@ ui <- navbarPage(
               }
             }, 100);
           });
+
+          // Hide the entire layer control panel on parking map
+          function hideParkingMapLayerControl() {
+            // Search all layer controls and find the one with parking map labels
+            var allControls = document.querySelectorAll('.leaflet-control-layers');
+            for (var i = 0; i < allControls.length; i++) {
+              var labels = allControls[i].querySelectorAll('label');
+              var foundParkingLayer = false;
+              for (var j = 0; j < labels.length; j++) {
+                var labelText = labels[j].textContent.trim();
+                // Check if this is the parking map layer control
+                if (labelText === 'Boundary' || labelText === 'All Landmarks' || 
+                    labelText === 'All Parking Zones' || labelText === 'Buffer') {
+                  foundParkingLayer = true;
+                  break;
+                }
+              }
+              // If found, hide the entire layer control panel
+              if (foundParkingLayer) {
+                allControls[i].style.display = 'none';
+              }
+            }
+          }
+
+          // Run on map initialization
+          $(document).on('shiny:value', function(event) {
+            if (event.target.id === 'map_parking') {
+              hideParkingMapLayerControl();
+            }
+          });
+
+          // Run periodically to catch layer control when it appears
+          var checkInterval = setInterval(function() {
+            hideParkingMapLayerControl();
+            // Stop checking after 5 seconds
+          }, 500);
+          setTimeout(function() { clearInterval(checkInterval); }, 5000);
         "))
       )
     )
-  ),
+  ), 
+  
+  
+  # --- Pedestrian Tab ---
+  tabPanel(
+    title = 'Pedestrian Counts',
+    sidebarLayout(
+      sidebarPanel(
+        selectInput(
+          inputId = 'type_pedestrian',
+          label = 'POI Type',
+          choices = c('All', unique(pois$subtype)),
+          selected = 'All'
+        ),
+        h4("Select Landmarks to Find Nearby Sensors"),
+        helpText("Choose one or more landmarks to find nearby pedestrian sensors"),
+        selectizeInput(
+          "lm_name_pedestrian",
+          "Landmark(s)",
+          choices = NULL,
+          options = list(
+            placeholder = "Type to search...",
+            plugins = list('remove_button')
+          ),
+          multiple = TRUE
+        ),
+        sliderInput(
+          inputId = 'radius_pedestrian',
+          label = 'Search Radius (Metres): ',
+          min = 100,
+          max = 1000,
+          value = 300,
+          step = 50,
+          ticks = TRUE
+        ),
+        width = 3,
+        style = 'max-width: 400px'
+      ),
+      mainPanel(
+        tabsetPanel(
+          id = "view_mode",
+          type = "tabs",
+          selected = "heatmap",
+          tabPanel(
+            "Heatmap View",
+            value = "heatmap",
+            leafletOutput("heatmap", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Ranking View",
+            value = "ranking",
+            plotlyOutput("popularity_plot", width = "100%", height = 600)
+          ),
+          tabPanel(
+            "Trend View",
+            value = "trend",
+            plotlyOutput("trend_plot", width = "100%", height = 600)
+          )
+        )
+      )
+    )
+  ), 
   
   
   
   # --- Crime Tab ---
   tabPanel(
-    "Melbourne Crime",
+    "Security View",
     sidebarLayout(
       sidebarPanel(
         width = 3,
-              wellPanel(
-                selectInput(
-                  inputId = 'type_crime',
-                  label = 'POI Type',
-                  choices = c('All', unique(pois$subtype)),
-                  selected = 'All'
-                ),
-                h4("Select Landmarks to Filter Crime Map"),
-                helpText("Choose one or more landmarks to filter and explore crime data around specific locations"),
-                selectizeInput(
-                  "lm_name_crime",
-                  "Landmark(s)",
-                  choices = NULL,
-                  options = list(
-                    placeholder = "Type to search...",
-                    plugins = list('remove_button')
-                  ),
-                  multiple = TRUE
-                ),
-                hr(),
-                selectInput("crime_category_filter", "Crime Category:",
-                           choices = c("All Offences" = "all",
-                                      "Crimes Against Person" = "person",
-                                      "Property & Deception" = "property",
-                                      "Drug Offences" = "drug",
-                                      "Public Order" = "public"),
-                           selected = "all")
-              ),
+        selectInput(
+          inputId = 'type_crime',
+          label = 'POI Type',
+          choices = c('All', unique(pois$subtype)),
+          selected = 'All'
+        ),
+        h4("Select Landmarks to Filter Crime Map"),
+        helpText("Choose one or more landmarks to filter and explore crime data around specific locations"),
+        selectizeInput(
+          "lm_name_crime",
+          "Landmark(s)",
+          choices = NULL,
+          options = list(
+            placeholder = "Type to search...",
+            plugins = list('remove_button')
+          ),
+          multiple = TRUE
+        ),
+        hr(),
+        selectInput("crime_category_filter", "Crime Category:",
+                   choices = c("All Offences" = "all",
+                              "Crimes Against Person" = "person",
+                              "Property & Deception" = "property",
+                              "Drug Offences" = "drug",
+                              "Public Order" = "public"),
+                   selected = "all"),
           # Hidden links for tooltip redirects (not visible to users)
           tags$div(
             style = "display: none;",
@@ -1430,7 +1493,7 @@ ui <- navbarPage(
             tabPanel(
               "Overview",
               value = "overview_tab",
-              h2("Melbourne Crime Statistics - Year Ending June 2025"),
+              h5("Melbourne Crime Statistics - Year Ending June 2025"),
               br(),
               fluidRow(
                 column(4, uiOutput("total_offences")),
@@ -1438,14 +1501,12 @@ ui <- navbarPage(
                 column(4, uiOutput("police_region"))
               ),
               br(),
-              h4("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
+              h6("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
               plotlyOutput("location_sunburst", width = "100%", height = 600)
             ),
             tabPanel(
-              "Crime Map",
+              "Interactive Map",
               value = "crime_map_tab",
-              h3("Interactive Visualization"),
-              p("Click on suburbs to see detailed crime statistics. Use the 'Explore More' buttons in tooltips to navigate to other views. Use the filters on the left to customize the view."),
               leafletOutput("crime_map", width = "100%", height = 600)
             ),
             tabPanel(
@@ -1534,6 +1595,8 @@ server <- function(input, output, session) {
   
   # on click
   observeEvent(input$mappt_marker_click, {
+    # Only process if we're on the Public Transport tab
+    if (is.null(input$mypage) || input$mypage != "Public Transport") return()
     
     # get click
     click <- input$mappt_marker_click
@@ -1546,38 +1609,31 @@ server <- function(input, output, session) {
     if (startsWith(id, 'poi')) {
       currpoi <- pois2[pois$id == id, ]
       
-      # find stops and stations closest to clicked poi
-      radius <- input$radius
-      stopsnear <- stops[as.numeric(st_distance(stops2, currpoi)) <= radius, ]
-      stationsnear <- stations[as.numeric(st_distance(stations2, currpoi)) <= radius, ]
+      # Get landmark name from clicked POI
+      landmark_name <- pois[pois$id == id, ]$name
       
-      # update map
-      leafletProxy('mappt') %>%
-        clearGroup('stopsnear') %>%
-        clearGroup('stationsnear') %>%
-        clearGroup('linesnear') %>%
-        
-        # add stops
-        {if (nrow(stopsnear) > 0) addAwesomeMarkers(., data = stopsnear, lng = ~lon, lat = ~lat, 
-                                                    icon = ~awesomeIcons(library = 'fa', 
-                                                                         markerColor = ~colour, 
-                                                                         icon = ~icon, 
-                                                                         iconColor = '#ffffff'), 
-                                                    label = ~name, 
-                                                    layerId = ~id, 
-                                                    group = 'stopsnear')
-          else .} %>%
-        
-        # add stations
-        {if (nrow(stationsnear) > 0) addAwesomeMarkers(., data = stationsnear, lng = ~lon, lat = ~lat, 
-                                                       icon = ~awesomeIcons(library = 'fa', 
-                                                                            markerColor = ~colour, 
-                                                                            icon = ~icon, 
-                                                                            iconColor = '#ffffff'), 
-                                                       label = ~station, 
-                                                       layerId = ~id, 
-                                                       group = 'stationsnear')
-          else .}
+      # Get current selections and add clicked landmark if not already selected
+      current_selection <- input$lm_name_pt
+      if (is.null(current_selection)) {
+        current_selection <- character(0)
+      }
+      
+      # If clicked landmark is not already in selection, add it; otherwise, remove it (toggle)
+      if (landmark_name %in% current_selection) {
+        # Remove from selection if already selected (toggle behavior)
+        new_selection <- current_selection[current_selection != landmark_name]
+      } else {
+        # Add to selection
+        new_selection <- c(current_selection, landmark_name)
+      }
+      
+      # Update the landmark selection dropdown
+      # This will automatically trigger the observeEvent for filtering
+      updateSelectizeInput(
+        session,
+        "lm_name_pt",
+        selected = new_selection
+      )
     }
     
     # stop click
@@ -1794,6 +1850,9 @@ server <- function(input, output, session) {
 
   # Update map when PT landmarks are selected
   observeEvent(c(input$lm_name_pt, input$radius), {
+    # Only update if we're on the Public Transport tab
+    if (is.null(input$mypage) || input$mypage != "Public Transport") return()
+    
     req(nrow(pois) > 0)
 
     map <- leafletProxy("mappt")
@@ -1989,10 +2048,16 @@ server <- function(input, output, session) {
            title = "Top 15 POIs by Nearby Pedestrian Volume") +
       theme_minimal(base_size = 12) +
       theme(legend.position = "bottom",
-            plot.title = element_text(size = 14, face = "bold")) + 
+            plot.title = element_text(size = 14, face = "bold", family = "Inter"),
+            text = element_text(family = "Inter"),
+            axis.text = element_text(family = "Inter"),
+            axis.title = element_text(family = "Inter"),
+            legend.text = element_text(family = "Inter"),
+            legend.title = element_text(family = "Inter")) + 
       scale_fill_manual(values = colourvals, name = 'Type')
     
-    ggplotly(p, tooltip = c("x", "y", "fill"))
+    ggplotly(p, tooltip = c("x", "y", "fill")) %>%
+      layout(font = list(family = "Inter"))
   })
   
   # Trend View (linked to theme filter)
@@ -2028,7 +2093,8 @@ server <- function(input, output, session) {
                        ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
         xaxis = list(title = "Date"),
         yaxis = list(title = "Total Pedestrians"),
-        hovermode = "x unified"
+        hovermode = "x unified",
+        font = list(family = "Inter")
       )
   })
 
@@ -2107,6 +2173,9 @@ server <- function(input, output, session) {
 
   # Update heatmap when Pedestrian landmarks are selected
   observeEvent(c(input$lm_name_pedestrian, input$radius_pedestrian), {
+    # Only update if we're on the Pedestrian Counts tab
+    if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
+    
     req(nrow(pois) > 0)
 
     map <- leafletProxy("heatmap")
@@ -2199,7 +2268,43 @@ server <- function(input, output, session) {
     }
   })
 
+  # Handle landmark marker clicks on Pedestrian heatmap
+  observeEvent(input$heatmap_marker_click, {
+    # Only process if we're on the Pedestrian Counts tab
+    if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
+    
+    click <- input$heatmap_marker_click
+    if (is.null(click$id)) return()
 
+    # Check if clicked marker is a landmark (POIs start with 'poi')
+    if (startsWith(click$id, 'poi')) {
+      # Get landmark name from clicked POI
+      landmark_name <- pois[pois$id == click$id, ]$name
+      
+      # Get current selections and add clicked landmark if not already selected
+      current_selection <- input$lm_name_pedestrian
+      if (is.null(current_selection)) {
+        current_selection <- character(0)
+      }
+      
+      # If clicked landmark is not already in selection, add it; otherwise, remove it (toggle)
+      if (landmark_name %in% current_selection) {
+        # Remove from selection if already selected (toggle behavior)
+        new_selection <- current_selection[current_selection != landmark_name]
+      } else {
+        # Add to selection
+        new_selection <- c(current_selection, landmark_name)
+      }
+      
+      # Update the landmark selection dropdown
+      # This will automatically trigger the observeEvent for filtering
+      updateSelectizeInput(
+        session,
+        "lm_name_pedestrian",
+        selected = new_selection
+      )
+    }
+  })
 
   # --- Parking Visualisations ---
 
@@ -2302,7 +2407,7 @@ server <- function(input, output, session) {
         data = filtered_pois,
         radius = 7,
         stroke = FALSE,
-        fillOpacity = 0.5,
+        fillOpacity = 1.0,
         fillColor = ~colour,
         label = ~name,
         layerId = ~id,
@@ -2381,6 +2486,9 @@ server <- function(input, output, session) {
 
   # Update landmarks on map when POI type changes
   observeEvent(input$type_parking, {
+    # Only update if we're on the Parking tab
+    if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
+    
     filtered_pois <- filtered_pois_parking()
 
     map <- leafletProxy("map_parking")
@@ -2390,12 +2498,12 @@ server <- function(input, output, session) {
       map <- addCircleMarkers(
         map,
         data = filtered_pois,
-        radius = 3,
+        radius = 7,
         stroke = FALSE,
-        fillOpacity = 0.4,
-        fillColor = "#00008B",
+        fillOpacity = 1.0,
+        fillColor = ~colour,
         label = ~name,
-        layerId = ~name,
+        layerId = ~id,
         group = "All Landmarks"
       )
     }
@@ -2403,23 +2511,48 @@ server <- function(input, output, session) {
 
   # Handle landmark marker clicks
   observeEvent(input$map_parking_marker_click, {
+    # Only process if we're on the Parking tab
+    if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
+    
     click <- input$map_parking_marker_click
     if (is.null(click$id)) return()
 
     # Check if clicked marker is a landmark (not a parking zone)
-    # Landmarks use their name as layerId, parking zones use "Zone XXX"
+    # Landmarks use their ID (poi1, poi2, etc.) as layerId, parking zones use "Zone XXX"
     if (!startsWith(click$id, "Zone ") && click$id != "No Zone ID") {
+      # Get landmark name from clicked POI ID
+      landmark_name <- pois[pois$id == click$id, ]$name
+      
+      # Get current selections and add clicked landmark if not already selected
+      current_selection <- input$lm_name_parking
+      if (is.null(current_selection)) {
+        current_selection <- character(0)
+      }
+      
+      # If clicked landmark is not already in selection, add it; otherwise, remove it (toggle)
+      if (landmark_name %in% current_selection) {
+        # Remove from selection if already selected (toggle behavior)
+        new_selection <- current_selection[current_selection != landmark_name]
+      } else {
+        # Add to selection
+        new_selection <- c(current_selection, landmark_name)
+      }
+      
       # Update the landmark selection dropdown
+      # This will automatically trigger the observeEvent for filtering
       updateSelectizeInput(
         session,
         "lm_name_parking",
-        selected = click$id
+        selected = new_selection
       )
     }
   })
 
   # Update map layers when landmarks are selected
   observeEvent(c(input$lm_name_parking, input$radius_m_parking), {
+    # Only update if we're on the Parking tab
+    if (is.null(input$mypage) || input$mypage != "On-street Parking") return()
+    
     req(nrow(pois) > 0)
     req(!is.null(zones_display))
 
@@ -2462,7 +2595,7 @@ server <- function(input, output, session) {
                         options = list(padding = c(50, 50)))
       }
 
-      # Add filtered landmarks (larger red markers)
+      # Add filtered landmarks (larger markers with their original colors)
       sel_lm_data <- sel_lm
       sel_lm_data$popup_text <- paste0("<b>", sel_lm_data$name, "</b><br>Category: ", sel_lm_data$subtype)
 
@@ -2472,8 +2605,8 @@ server <- function(input, output, session) {
         radius = 8,
         stroke = TRUE,
         weight = 2,
-        fillOpacity = 0.9,
-        fillColor = "#e31a1c",
+        fillOpacity = 1.0,
+        fillColor = ~colour,
         color = "#fff",
         label = ~name,
         popup = ~popup_text,
@@ -2848,7 +2981,7 @@ server <- function(input, output, session) {
 
   # Initialize map when switching to Crime tab
   observeEvent(input$mypage, {
-    if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
+    if (!is.null(input$mypage) && input$mypage == "Security View") {
       # Use isolate to prevent reactive dependencies
       isolate({
         crime_suburbs <- crime_suburb_data()
@@ -3066,6 +3199,9 @@ server <- function(input, output, session) {
   
   # Update landmarks on map when POI type changes
   observeEvent(input$type_crime, {
+    # Only update if we're on the Security View tab
+    if (is.null(input$mypage) || input$mypage != "Security View") return()
+    
     filtered_pois <- filtered_pois_crime()
     
     map <- leafletProxy("crime_map")
@@ -3135,6 +3271,9 @@ server <- function(input, output, session) {
   
   # Handle landmark marker clicks
   observeEvent(input$crime_map_marker_click, {
+    # Only process if we're on the Security View tab
+    if (is.null(input$mypage) || input$mypage != "Security View") return()
+    
     click <- input$crime_map_marker_click
     if (is.null(click$id)) return()
     
@@ -3196,6 +3335,9 @@ server <- function(input, output, session) {
   
   # Update map layers when landmarks are selected
   observeEvent(input$lm_name_crime, {
+    # Only update if we're on the Security View tab
+    if (is.null(input$mypage) || input$mypage != "Security View") return()
+    
     req(!is.null(pois))
     # Force reactivity - trigger even when selection is cleared
     
@@ -3275,7 +3417,7 @@ server <- function(input, output, session) {
   # Update map when filters change
   observeEvent(input$crime_category_filter, {
     # Only update if we're on the Crime tab
-    if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
+    if (!is.null(input$mypage) && input$mypage == "Security View") {
       crime_suburbs <- crime_suburb_data()
 
       # Only update if we have data
@@ -3336,9 +3478,9 @@ server <- function(input, output, session) {
     total <- sum(crime_data$table01$`Offence Count`, na.rm = TRUE)
     tags$div(
       class = "well text-center",
-      style = "background-color: #f8d7da; border-color: #f5c6cb; padding: 20px;",
-      tags$h3(format(total, big.mark = ","), style = "margin: 0; color: #721c24;"),
-      tags$p("Total Offences", style = "margin: 5px 0 0 0; color: #721c24;")
+      style = "background-color: #f8d7da; border-color: #f5c6cb; padding: 10px;",
+      tags$h4(format(total, big.mark = ","), style = "margin: 0; color: #721c24; font-size: 20px;"),
+      tags$p("Total Offences", style = "margin: 3px 0 0 0; color: #721c24; font-size: 12px;")
     )
   })
 
@@ -3346,9 +3488,9 @@ server <- function(input, output, session) {
     rate <- mean(crime_data$table01$`Rate per 100,000 population`, na.rm = TRUE)
     tags$div(
       class = "well text-center",
-      style = "background-color: #fff3cd; border-color: #ffeaa7; padding: 20px;",
-      tags$h3(round(rate, 1), style = "margin: 0; color: #856404;"),
-      tags$p("Crime Rate per 100,000", style = "margin: 5px 0 0 0; color: #856404;")
+      style = "background-color: #fff3cd; border-color: #ffeaa7; padding: 10px;",
+      tags$h4(round(rate, 1), style = "margin: 0; color: #856404; font-size: 20px;"),
+      tags$p("Crime Rate per 100,000", style = "margin: 3px 0 0 0; color: #856404; font-size: 12px;")
     )
   })
   
@@ -3359,9 +3501,9 @@ server <- function(input, output, session) {
     }
     tags$div(
       class = "well text-center",
-      style = "background-color: #d1ecf1; border-color: #bee5eb; padding: 20px;",
-      tags$h3(region, style = "margin: 0; color: #0c5460;"),
-      tags$p("Police Region", style = "margin: 5px 0 0 0; color: #0c5460;")
+      style = "background-color: #d1ecf1; border-color: #bee5eb; padding: 10px;",
+      tags$h4(region, style = "margin: 0; color: #0c5460; font-size: 20px;"),
+      tags$p("Police Region", style = "margin: 3px 0 0 0; color: #0c5460; font-size: 12px;")
     )
   })
   
@@ -3643,9 +3785,10 @@ server <- function(input, output, session) {
                 `Percentage` = round(sum(`Offence Count`, na.rm = TRUE) /
                                        sum(crime_data$table05$`Offence Count`, na.rm = TRUE) * 100, 2))
     datatable(investigation_data, 
-              options = list(pageLength = 10, scrollX = TRUE, 
+              options = list(pageLength = 100, scrollX = TRUE, 
                             lengthMenu = FALSE,
-                            dom = 'tip'),  # 't' = table, 'i' = info, 'p' = pagination (no 'l' for length, no 'f' for search)
+                            paging = FALSE,
+                            dom = 'ti'),  # 't' = table, 'i' = info (no 'p' for pagination)
               rownames = FALSE)
   })
   
