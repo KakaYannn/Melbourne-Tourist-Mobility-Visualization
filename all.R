@@ -6,6 +6,8 @@ library(leaflet)
 library(ggplot2)
 library(ggiraph)
 
+library(htmltools)
+
 library(readxl)
 library(readr)
 library(leaflet.extras)
@@ -1397,36 +1399,100 @@ ui <- navbarPage(
       fluidRow(
         column(
           width = 3,
-          wellPanel(
-            h4("Views"),
-            tags$ul(
-              style = "list-style-type:none; padding-left:0;",
-              tags$li(actionLink("nav_crime_map", "Crime Map", style = "font-weight: bold; color: #0066cc;")),
-              tags$li(actionLink("nav_overview", "Overview")),
-              tags$li(actionLink("nav_categories", "Offence Categories")),
-              tags$li(actionLink("nav_suburbs", "Suburbs Analysis")),
-              tags$li(actionLink("nav_locations", "Location Types")),
-              tags$li(actionLink("nav_investigation", "Investigation Status")),
-              tags$li(actionLink("nav_drugs", "Drug Offences")),
-              tags$li(actionLink("nav_tables", "Data Tables"))
-            )
-          ),
-          wellPanel(
-            h4("Map Filters"),
-            selectInput("crime_category_filter", "Crime Category:",
-                       choices = c("All Offences" = "all",
-                                  "Crimes Against Person" = "person",
-                                  "Property & Deception" = "property",
-                                  "Drug Offences" = "drug",
-                                  "Public Order" = "public"),
-                       selected = "all"),
-            sliderInput("crime_min_offences", "Minimum Offences:",
-                       min = 0, max = 1000, value = 0, step = 10)
+              wellPanel(
+                h4("Map Filters"),
+                selectInput("crime_category_filter", "Crime Category:",
+                           choices = c("All Offences" = "all",
+                                      "Crimes Against Person" = "person",
+                                      "Property & Deception" = "property",
+                                      "Drug Offences" = "drug",
+                                      "Public Order" = "public"),
+                           selected = "all"),
+                hr(),
+                h4("Landmark Filters"),
+                selectInput(
+                  inputId = 'type_crime',
+                  label = 'POI Type',
+                  choices = c('All', unique(pois$subtype)),
+                  selected = 'All'
+                ),
+                selectizeInput(
+                  "lm_name_crime",
+                  "Landmark(s)",
+                  choices = NULL,
+                  options = list(
+                    placeholder = "Type to search...",
+                    plugins = list('remove_button')
+                  ),
+                  multiple = TRUE
+                )
+              ),
+          # Hidden links for tooltip redirects (not visible to users)
+          tags$div(
+            style = "display: none;",
+            actionLink("nav_categories", ""),
+            actionLink("nav_suburbs", ""),
+            actionLink("nav_tables", ""),
+            actionLink("nav_locations", "")
           )
         ),
         column(
           width = 9,
-          uiOutput("crime_main_panel")
+          tabsetPanel(
+            id = "crime_tabs",
+            type = "tabs",
+            selected = "crime_map_tab",
+            tabPanel(
+              "Overview",
+              value = "overview_tab",
+              br(),
+              fluidRow(
+                column(4, uiOutput("total_offences")),
+                column(4, uiOutput("crime_rate")),
+                column(4, uiOutput("police_region"))
+              ),
+              br(),
+              h4("Location Types Breakdown (All Suburbs - breakdown by suburb not available)"),
+              plotlyOutput("location_sunburst", height = 600)
+            ),
+            tabPanel(
+              "Crime Map",
+              value = "crime_map_tab",
+              h3("Interactive Visualization"),
+              p("Click on suburbs to see detailed crime statistics. Use the 'Explore More' buttons in tooltips to navigate to other views. Use the filters on the left to customize the view."),
+              leafletOutput("crime_map", width = "100%", height = 600)
+            ),
+            tabPanel(
+              "Investigation Status",
+              value = "investigation_tab",
+              br(),
+              fluidRow(
+                column(6, plotlyOutput("investigation_pie", height = 400)),
+                column(6, plotlyOutput("investigation_bar", height = 400))
+              ),
+              DTOutput("investigation_table")
+            ),
+            tabPanel(
+              "Drug Offences",
+              value = "drugs_tab",
+              br(),
+              selectInput("drug_filter", "Drug Filter By:",
+                          choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
+                          selected = "CSA Drug Type"),
+              plotlyOutput("drug_plot", height = 500)
+            )
+          ),
+          # Hidden panels for tooltip navigation (not visible as tabs)
+          tags$div(
+            id = "hidden_categories_panel",
+            style = "display: none;",
+            uiOutput("categories_panel")
+          ),
+          tags$div(
+            id = "hidden_tables_panel",
+            style = "display: none;",
+            uiOutput("tables_panel")
+          )
         )
       )
     )
@@ -1438,8 +1504,14 @@ ui <- navbarPage(
 # --- Server ---
 server <- function(input, output, session) {
   
+  # Reactive value to store selected suburb from map tooltip
+  selected_suburb_filter <- reactiveVal(NULL)
   
-
+  # Reactive value to track current view for clear filter functionality
+  current_view <- reactiveVal("crime_map")
+  
+  
+  
 # --- PT Visualisations ---
   
   # create map
@@ -2190,8 +2262,35 @@ server <- function(input, output, session) {
 
   # Crime Map Data (reactive) - suburb-based crime data with geometries
   crime_suburb_data <- reactive({
-    # Get crime data by suburb with category breakdown
-    crime_summary <- crime_data$table03 %>%
+    # Apply category filter - default to "all" if NULL or not set
+    category_filter <- if (is.null(input$crime_category_filter)) "all" else input$crime_category_filter
+
+    # Filter raw data by category if a specific category is selected
+    if (category_filter != "all") {
+      filtered_data <- crime_data$table03 %>%
+        filter(
+          case_when(
+            category_filter == "person" ~ grepl("person", `Offence Division`, ignore.case = TRUE),
+            category_filter == "property" ~ grepl("property|deception", `Offence Division`, ignore.case = TRUE),
+            category_filter == "drug" ~ grepl("drug", `Offence Division`, ignore.case = TRUE),
+            category_filter == "public" ~ grepl("public order|security|justice", `Offence Division`, ignore.case = TRUE),
+            TRUE ~ TRUE
+          )
+        )
+    } else {
+      filtered_data <- crime_data$table03
+    }
+
+    # Get crime data by suburb - compute totals and category breakdowns
+    crime_summary <- filtered_data %>%
+      group_by(`Suburb/Town Name`) %>%
+      summarise(
+        Display_Count = sum(`Offence Count`, na.rm = TRUE),
+        .groups = 'drop'
+      )
+    
+    # Also compute all category breakdowns for tooltip info (if needed in future)
+    all_categories <- crime_data$table03 %>%
       group_by(`Suburb/Town Name`) %>%
       summarise(
         Total_Offences = sum(`Offence Count`, na.rm = TRUE),
@@ -2201,30 +2300,21 @@ server <- function(input, output, session) {
         Public_Order = sum(`Offence Count`[grepl("public order|security|justice", `Offence Division`, ignore.case = TRUE)], na.rm = TRUE),
         .groups = 'drop'
       )
-
-    # Apply category filter - default to "all" if NULL or not set
-    category_filter <- if (is.null(input$crime_category_filter)) "all" else input$crime_category_filter
-
-    if (category_filter != "all") {
-      crime_summary <- crime_summary %>%
-        mutate(
-          Display_Count = case_when(
-            category_filter == "person" ~ Person_Crimes,
-            category_filter == "property" ~ Property_Crimes,
-            category_filter == "drug" ~ Drug_Crimes,
-            category_filter == "public" ~ Public_Order,
-            TRUE ~ Total_Offences
-          )
-        )
-    } else {
-      crime_summary <- crime_summary %>%
-        mutate(Display_Count = Total_Offences)
-    }
-
-    # Filter by minimum offences - default to 0 if NULL
-    min_val <- if (is.null(input$crime_min_offences)) 0 else input$crime_min_offences
+    
+    # Merge Display_Count with all categories
     crime_summary <- crime_summary %>%
-      filter(Display_Count >= min_val)
+      left_join(all_categories, by = "Suburb/Town Name") %>%
+      mutate(
+        Total_Offences = ifelse(is.na(Total_Offences), 0, Total_Offences),
+        Person_Crimes = ifelse(is.na(Person_Crimes), 0, Person_Crimes),
+        Property_Crimes = ifelse(is.na(Property_Crimes), 0, Property_Crimes),
+        Drug_Crimes = ifelse(is.na(Drug_Crimes), 0, Drug_Crimes),
+        Public_Order = ifelse(is.na(Public_Order), 0, Public_Order)
+      )
+    
+    # Filter out suburbs with 0 offences for the selected category
+    crime_summary <- crime_summary %>%
+      filter(Display_Count > 0)
 
     # Join with suburb geometries
     # Convert suburb names to uppercase to match the geometry data
@@ -2234,7 +2324,7 @@ server <- function(input, output, session) {
         crime_summary %>% mutate(suburb_match = toupper(`Suburb/Town Name`)),
         by = "suburb_match"
       ) %>%
-      filter(!is.na(Total_Offences)) %>%  # Only keep suburbs with crime data
+      filter(!is.na(Display_Count)) %>%  # Only keep suburbs with crime data for selected category
       select(suburb_name, `Suburb/Town Name`, Total_Offences, Person_Crimes,
              Property_Crimes, Drug_Crimes, Public_Order, Display_Count, geometry)
 
@@ -2262,10 +2352,9 @@ server <- function(input, output, session) {
       crime_summary <- crime_summary %>%
         mutate(Display_Count = Total_Offences)
       
-      # Default minimum offences is 0
-      min_val <- 0
+      # Filter out suburbs with 0 offences
       crime_summary <- crime_summary %>%
-        filter(Display_Count >= min_val)
+        filter(Display_Count > 0)
       
       # Join with suburb geometries
       crime_suburbs <- melbourne_suburbs %>%
@@ -2298,7 +2387,7 @@ server <- function(input, output, session) {
                  weight = 3,
                  fill = FALSE)
     
-    # Add landmarks by default
+    # Add landmarks by default (on separate "All Landmarks" layer)
     if (nrow(pois) > 0) {
       map <- map %>%
         addCircleMarkers(
@@ -2311,7 +2400,7 @@ server <- function(input, output, session) {
           fillOpacity = 1,
           label = ~name,
           layerId = ~id,
-          group = 'Landmarks'
+          group = 'All Landmarks'
         )
     }
     
@@ -2323,30 +2412,36 @@ server <- function(input, output, session) {
           fillColor = ~pal(Display_Count),
           fillOpacity = 0.6,
           stroke = TRUE,
-          weight = 2,
-          color = "#333333",
-          opacity = 1,
+          weight = 0.8,
+          color = "#666666",
+          opacity = 0.7,
+          dashArray = "5, 5",
           highlight = highlightOptions(
-            weight = 3,
-            color = "#666",
+            weight = 1.5,
+            color = "#333",
             fillOpacity = 0.8,
-            bringToFront = TRUE
+            bringToFront = TRUE,
+            dashArray = "5, 5"
           ),
-          label = lapply(paste0(
-            "<b>", crime_suburbs$suburb_name, "</b><br/>",
-            "<hr style='margin: 5px 0;'/>",
-            "<b>Showing:</b> All Offences<br/>",
-            "<b>Current Filter:</b> ", format(crime_suburbs$Display_Count, big.mark = ","), " offences<br/>",
-            "<hr style='margin: 5px 0;'/>",
-            "<b>Total Offences:</b> ", format(crime_suburbs$Total_Offences, big.mark = ","), "<br/>",
-            "<b>Person Crimes:</b> ", format(crime_suburbs$Person_Crimes, big.mark = ","), "<br/>",
-            "<b>Property Crimes:</b> ", format(crime_suburbs$Property_Crimes, big.mark = ","), "<br/>",
-            "<b>Drug Offences:</b> ", format(crime_suburbs$Drug_Crimes, big.mark = ","), "<br/>",
-            "<b>Public Order:</b> ", format(crime_suburbs$Public_Order, big.mark = ",")
-          ), htmltools::HTML),
-          labelOptions = labelOptions(
-            style = list("font-size" = "12px", "font-family" = "Arial"),
-            direction = "auto"
+          popup = lapply(seq_len(nrow(crime_suburbs)), function(i) {
+            suburb <- crime_suburbs[i, ]
+            suburb_name_js <- gsub("'", "\\'", suburb$suburb_name)
+            suburb_name_js <- gsub('"', '\\"', suburb_name_js)
+            HTML(paste0(
+              "<div style='font-family: Arial;'>",
+              "<h4 style='margin: 0 0 10px 0;'>", htmlEscape(suburb$suburb_name), "</h4>",
+              "<p><strong>Current Filter:</strong> ", format(suburb$Display_Count, big.mark = ","), " offences</p>",
+              "<hr>",
+              "<div style='margin-top: 10px;'>",
+              "<a href='#' onclick=\"Shiny.setInputValue('map_suburb_filter', '", suburb_name_js, "', {priority: 'event'}); setTimeout(function() { $('#nav_categories').click(); }, 50); return false;\" style='background: #007bff; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block;'>Categories details</a> ",
+              "<a href='#' onclick=\"Shiny.setInputValue('map_suburb_filter', '", suburb_name_js, "', {priority: 'event'}); setTimeout(function() { $('#nav_tables').click(); }, 50); return false;\" style='background: #6c757d; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block;'>Data details</a>",
+              "</div>",
+              "</div>"
+            ))
+          }),
+          popupOptions = popupOptions(
+            maxWidth = 300,
+            style = list("font-size" = "12px")
           ),
           group = 'Crime Suburbs'
         ) %>%
@@ -2358,54 +2453,13 @@ server <- function(input, output, session) {
           opacity = 0.7,
           layerId = "crime_legend"
         )
-      
-      # Add heatmap layer
-      centroids <- suppressWarnings(st_centroid(st_geometry(crime_suburbs)))
-      coords <- st_coordinates(centroids)
-      
-      map <- map %>%
-        addHeatmap(
-          lng = coords[, "X"],
-          lat = coords[, "Y"],
-          intensity = crime_suburbs$Display_Count,
-          blur = 35,
-          max = 0.7,
-          radius = 25,
-          gradient = c("yellow", "orange", "red", "darkred"),
-          group = "Crime Heatmap"
-        )
     }
     
     # Add layer control
     map <- map %>%
       addLayersControl(
-        overlayGroups = c("Landmarks", "Crime Suburbs", "Crime Heatmap"),
+        overlayGroups = c("Crime Suburbs", "All Landmarks"),
         options = layersControlOptions(collapsed = FALSE)
-      ) %>%
-      # Add custom legend for heatmap
-      addControl(
-        html = paste0(
-          "<div style='background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);'>",
-          "<h4 style='margin: 0 0 10px 0;'>Crime Heatmap Legend</h4>",
-          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
-          "<div style='width: 20px; height: 20px; background: yellow; margin-right: 8px; border: 1px solid #999;'></div>",
-          "<span>Low Crime</span>",
-          "</div>",
-          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
-          "<div style='width: 20px; height: 20px; background: orange; margin-right: 8px; border: 1px solid #999;'></div>",
-          "<span>Medium Crime</span>",
-          "</div>",
-          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
-          "<div style='width: 20px; height: 20px; background: red; margin-right: 8px; border: 1px solid #999;'></div>",
-          "<span>High Crime</span>",
-          "</div>",
-          "<div style='display: flex; align-items: center; margin: 5px 0;'>",
-          "<div style='width: 20px; height: 20px; background: darkred; margin-right: 8px; border: 1px solid #999;'></div>",
-          "<span>Very High Crime</span>",
-          "</div>",
-          "</div>"
-        ),
-        position = "topright"
       )
     
     map
@@ -2413,16 +2467,10 @@ server <- function(input, output, session) {
 
   # Initialize map when switching to Crime tab
   observeEvent(input$mypage, {
-    cat('[DEBUG-TAB] Tab changed to:', input$mypage, '\n')
-
     if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
-      cat('[DEBUG-TAB] Crime tab detected, initializing map...\n')
-
       # Use isolate to prevent reactive dependencies
       isolate({
-        cat('[DEBUG-TAB] Getting crime_suburb_data...\n')
         crime_suburbs <- crime_suburb_data()
-        cat('[DEBUG-TAB] Crime suburbs rows:', nrow(crime_suburbs), '\n')
 
         if (nrow(crime_suburbs) > 0) {
           category_name <- if (!is.null(input$crime_category_filter)) {
@@ -2436,12 +2484,7 @@ server <- function(input, output, session) {
           } else {
             "All Offences"
           }
-          cat('[DEBUG-TAB] Category:', category_name, '\n')
-          cat('[DEBUG-TAB] Calling updateCrimeMap...\n')
           updateCrimeMap(crime_suburbs, category_name)
-          cat('[DEBUG-TAB] Map update complete\n')
-        } else {
-          cat('[DEBUG-TAB] WARNING: No crime suburb data!\n')
         }
       })
     }
@@ -2449,36 +2492,46 @@ server <- function(input, output, session) {
 
   # Define the update function
   updateCrimeMap <- function(crime_suburbs, category_name) {
-    cat('[DEBUG-UPDATE] updateCrimeMap called with', nrow(crime_suburbs), 'suburbs\n')
-    cat('[DEBUG-UPDATE] Category:', category_name, '\n')
-
     # Create color palette
     if (nrow(crime_suburbs) > 0) {
       pal <- colorNumeric(
         palette = c("#FEF0D9", "#FDCC8A", "#FC8D59", "#E34A33", "#B30000"),
         domain = crime_suburbs$Display_Count
       )
-      cat('[DEBUG-UPDATE] Color palette created\n')
     }
 
+    # Get filtered POIs based on current input
+    if (is.null(input$type_crime) || input$type_crime == 'All') {
+      filtered_pois_to_add <- pois
+    } else {
+      filtered_pois_to_add <- pois[pois$subtype == input$type_crime, ]
+    }
+    
     # Update map layers
     leafletProxy("crime_map") %>%
-      clearGroup("Landmarks") %>%
       clearGroup("Crime Heatmap") %>%
       clearGroup("Crime Suburbs") %>%
-      # Add regular POI landmarks
-      addCircleMarkers(
-        data = pois,
-        lng = ~lon, lat = ~lat,
-        radius = 7,
-        stroke = FALSE,
-        fill = TRUE,
-        fillColor = ~colour,
-        fillOpacity = 1,
-        label = ~name,
-        layerId = ~id,
-        group = 'Landmarks'
-      ) %>%
+      clearGroup("All Landmarks") %>%
+      # Add filtered POI landmarks
+      {
+        if (nrow(filtered_pois_to_add) > 0) {
+          addCircleMarkers(
+            .,
+            data = filtered_pois_to_add,
+            lng = ~lon, lat = ~lat,
+            radius = 7,
+            stroke = FALSE,
+            fill = TRUE,
+            fillColor = ~colour,
+            fillOpacity = 1,
+            label = ~name,
+            layerId = ~id,
+            group = 'All Landmarks'
+          )
+        } else {
+          .
+        }
+      } %>%
       {
         # Add suburb polygons
         if (nrow(crime_suburbs) > 0) {
@@ -2488,30 +2541,37 @@ server <- function(input, output, session) {
             fillColor = ~pal(Display_Count),
             fillOpacity = 0.6,
             stroke = TRUE,
-            weight = 2,
-            color = "#333333",
-            opacity = 1,
+            weight = 0.8,
+            color = "#666666",
+            opacity = 0.7,
+            dashArray = "5, 5",
             highlight = highlightOptions(
-              weight = 3,
-              color = "#666",
+              weight = 1.5,
+              color = "#333",
               fillOpacity = 0.8,
-              bringToFront = TRUE
+              bringToFront = TRUE,
+              dashArray = "5, 5"
             ),
-            label = lapply(paste0(
-              "<b>", crime_suburbs$suburb_name, "</b><br/>",
-              "<hr style='margin: 5px 0;'/>",
-              "<b>Showing:</b> ", category_name, "<br/>",
-              "<b>Current Filter:</b> ", format(crime_suburbs$Display_Count, big.mark = ","), " offences<br/>",
-              "<hr style='margin: 5px 0;'/>",
-              "<b>Total Offences:</b> ", format(crime_suburbs$Total_Offences, big.mark = ","), "<br/>",
-              "<b>Person Crimes:</b> ", format(crime_suburbs$Person_Crimes, big.mark = ","), "<br/>",
-              "<b>Property Crimes:</b> ", format(crime_suburbs$Property_Crimes, big.mark = ","), "<br/>",
-              "<b>Drug Offences:</b> ", format(crime_suburbs$Drug_Crimes, big.mark = ","), "<br/>",
-              "<b>Public Order:</b> ", format(crime_suburbs$Public_Order, big.mark = ",")
-            ), htmltools::HTML),
-            labelOptions = labelOptions(
-              style = list("font-size" = "12px", "font-family" = "Arial"),
-              direction = "auto"
+            popup = lapply(seq_len(nrow(crime_suburbs)), function(i) {
+              suburb <- crime_suburbs[i, ]
+              suburb_name_js <- gsub("'", "\\'", suburb$suburb_name)
+              suburb_name_js <- gsub('"', '\\"', suburb_name_js)
+              HTML(paste0(
+                "<div style='font-family: Arial;'>",
+                "<h4 style='margin: 0 0 10px 0;'>", htmlEscape(suburb$suburb_name), "</h4>",
+                "<p><strong>Showing:</strong> ", htmlEscape(category_name), "</p>",
+                "<p><strong>Current Filter:</strong> ", format(suburb$Display_Count, big.mark = ","), " offences</p>",
+                "<hr>",
+                "<div style='margin-top: 10px;'>",
+                "<a href='#' onclick=\"Shiny.setInputValue('map_suburb_filter', '", suburb_name_js, "', {priority: 'event'}); setTimeout(function() { $('#nav_categories').click(); }, 50); return false;\" style='background: #007bff; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block;'>Categories details</a> ",
+                "<a href='#' onclick=\"Shiny.setInputValue('map_suburb_filter', '", suburb_name_js, "', {priority: 'event'}); setTimeout(function() { $('#nav_tables').click(); }, 50); return false;\" style='background: #6c757d; color: white; padding: 5px 10px; margin: 2px; border-radius: 3px; text-decoration: none; display: inline-block;'>Data details</a>",
+                "</div>",
+                "</div>"
+              ))
+            }),
+            popupOptions = popupOptions(
+              maxWidth = 300,
+              style = list("font-size" = "12px")
             ),
             group = 'Crime Suburbs'
           ) %>%
@@ -2526,43 +2586,60 @@ server <- function(input, output, session) {
         } else {
           .
         }
-      } %>%
-      {
-        # Add heatmap layer
-        if (nrow(crime_suburbs) > 0) {
-          # Calculate centroids - suppress the attributes warning
-          centroids <- suppressWarnings(st_centroid(st_geometry(crime_suburbs)))
-          coords <- st_coordinates(centroids)
-
-          addHeatmap(
-            .,
-            lng = coords[, "X"],
-            lat = coords[, "Y"],
-            intensity = crime_suburbs$Display_Count,
-            blur = 35,
-            max = 0.7,
-            radius = 25,
-            gradient = c("yellow", "orange", "red", "darkred"),
-            group = "Crime Heatmap"
-          )
-        } else {
-          .
-        }
       }
-  }
+    }
+
+  # --- Crime Tab Landmark Filtering Logic ---
+  
+  # Filtered POIs by type for crime tab
+  filtered_pois_crime <- reactive({
+    if (is.null(input$type_crime) || input$type_crime == 'All') {
+      return(pois)
+    } else {
+      return(pois[pois$subtype == input$type_crime, ])
+    }
+  })
+
+  # Update landmark choices when POI type changes
+  observe({
+    filtered_pois <- filtered_pois_crime()
+    updateSelectizeInput(
+      session,
+      "lm_name_crime",
+      choices = if (nrow(filtered_pois) > 0) sort(unique(filtered_pois$name)) else NULL,
+      selected = character(0)
+    )
+  })
+  
+  # Update landmarks on map when POI type changes
+  observeEvent(input$type_crime, {
+    filtered_pois <- filtered_pois_crime()
+    
+    map <- leafletProxy("crime_map")
+    map <- clearGroup(map, "All Landmarks")
+    
+    if (nrow(filtered_pois) > 0) {
+      map <- addCircleMarkers(
+        map,
+        data = filtered_pois,
+        lng = ~lon, lat = ~lat,
+        radius = 7,
+        stroke = FALSE,
+        fill = TRUE,
+        fillColor = ~colour,
+        fillOpacity = 1,
+        label = ~name,
+        layerId = ~id,
+        group = "All Landmarks"
+      )
+    }
+  })
 
   # Update map when filters change
-  observeEvent(c(input$crime_category_filter, input$crime_min_offences), {
-    cat('[DEBUG-FILTER] Filter changed - Category:', input$crime_category_filter,
-        'Min:', input$crime_min_offences, '\n')
-    cat('[DEBUG-FILTER] Current tab:', input$mypage, '\n')
-
+  observeEvent(input$crime_category_filter, {
     # Only update if we're on the Crime tab
     if (!is.null(input$mypage) && input$mypage == "Melbourne Crime") {
-      cat('[DEBUG-FILTER] On Crime tab, updating map...\n')
-
       crime_suburbs <- crime_suburb_data()
-      cat('[DEBUG-FILTER] Got', nrow(crime_suburbs), 'suburbs\n')
 
       # Only update if we have data
       if (nrow(crime_suburbs) > 0) {
@@ -2579,14 +2656,9 @@ server <- function(input, output, session) {
           "All Offences"
         }
 
-        cat('[DEBUG-FILTER] Calling updateCrimeMap with category:', category_name, '\n')
         # Call the update function
         updateCrimeMap(crime_suburbs, category_name)
-      } else {
-        cat('[DEBUG-FILTER] WARNING: No suburbs to display!\n')
       }
-    } else {
-      cat('[DEBUG-FILTER] Not on Crime tab, skipping update\n')
     }
   }, ignoreNULL = FALSE)
 
@@ -2605,10 +2677,7 @@ server <- function(input, output, session) {
       ) %>%
       arrange(desc(Total_Offences))
 
-    # Apply minimum filter
-    min_val <- if (!is.null(input$crime_min_offences)) input$crime_min_offences else 0
-    crime_suburb_summary <- crime_suburb_summary %>%
-      filter(Total_Offences >= min_val)
+    # No minimum filter - show all suburbs
 
     datatable(
       crime_suburb_summary,
@@ -2645,9 +2714,12 @@ server <- function(input, output, session) {
       tags$p("Crime Rate per 100,000", style = "margin: 5px 0 0 0; color: #856404;")
     )
   })
-
+  
   output$police_region <- renderUI({
     region <- unique(crime_data$table01$`Police Region`)[1]
+    if (is.na(region) || length(region) == 0) {
+      region <- "N/A"
+    }
     tags$div(
       class = "well text-center",
       style = "background-color: #d1ecf1; border-color: #bee5eb; padding: 20px;",
@@ -2659,10 +2731,24 @@ server <- function(input, output, session) {
   output$overview_summary <- renderPrint({
     summary(crime_data$table01)
   })
+
   
   # Offence Categories
+  # Note: Using table03 instead of table02 because table02 doesn't have suburb information
+  # table03 has both suburb and category breakdown, allowing suburb filtering
   output$category_plot <- renderPlotly({
-    category_data <- crime_data$table02 %>%
+    category_data <- crime_data$table03
+    suburb_filter <- selected_suburb_filter()
+    # Fallback to input if reactive value not set yet
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    if (!is.null(suburb_filter) && suburb_filter != "") {
+      category_data <- category_data %>% filter(`Suburb/Town Name` == suburb_filter)
+    }
+    category_data <- category_data %>%
       group_by(!!sym(input$category_level)) %>%
       summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
       arrange(desc(Total)) %>%
@@ -2677,28 +2763,71 @@ server <- function(input, output, session) {
   })
   
   output$top_categories <- renderPlotly({
-    category_data <- crime_data$table02 %>%
+    category_data <- crime_data$table03
+    suburb_filter <- selected_suburb_filter()
+    # Fallback to input if reactive value not set yet
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    if (!is.null(suburb_filter) && suburb_filter != "") {
+      category_data <- category_data %>% filter(`Suburb/Town Name` == suburb_filter)
+    }
+    category_data <- category_data %>%
       group_by(!!sym(input$category_level)) %>%
       summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
       arrange(desc(Total)) %>% head(10) %>%
       rename(Category = !!sym(input$category_level))
     plot_ly(category_data, labels = ~Category, values = ~Total, type = 'pie',
             textposition = 'inside', textinfo = 'label+percent') %>%
-      layout(title = "Top 10 Categories")
+      layout(
+        title = "Top 10 Categories",
+        width = 600,
+        height = 600,
+        margin = list(l = 50, r = 50, t = 50, b = 50)
+      )
   })
   
   output$category_rate <- renderPlotly({
-    rate_data <- crime_data$table02 %>%
-      group_by(!!sym(input$category_level)) %>%
-      summarise(AvgRate = mean(`LGA Rate per 100,000 population`, na.rm = TRUE)) %>%
-      arrange(desc(AvgRate)) %>% head(10) %>%
-      rename(Category = !!sym(input$category_level))
-    plot_ly(rate_data,
-            x = ~AvgRate, y = ~reorder(Category, AvgRate),
-            type = 'bar', orientation = 'h',
-            marker = list(color = 'coral')) %>%
-      layout(title = "Crime Rate by Category (Top 10)",
-             xaxis = list(title = "Rate per 100,000"), yaxis = list(title = ""))
+    # For rate calculation, we can't use table03 directly as it doesn't have rate columns
+    # But we can calculate rate if suburb is filtered, or show aggregated data
+    category_data <- crime_data$table03
+    suburb_filter <- selected_suburb_filter()
+    # Fallback to input if reactive value not set yet
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    if (!is.null(suburb_filter) && suburb_filter != "") {
+      category_data <- category_data %>% filter(`Suburb/Town Name` == suburb_filter)
+      # When filtered by suburb, show count instead of rate (since table03 doesn't have rate data)
+      rate_data <- category_data %>%
+        group_by(!!sym(input$category_level)) %>%
+        summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
+        arrange(desc(Total)) %>% head(10) %>%
+        rename(Category = !!sym(input$category_level))
+      plot_ly(rate_data,
+              x = ~Total, y = ~reorder(Category, Total),
+              type = 'bar', orientation = 'h',
+              marker = list(color = 'coral')) %>%
+        layout(title = "Offence Count by Category (Top 10) - Filtered Suburb",
+               xaxis = list(title = "Number of Offences"), yaxis = list(title = ""))
+    } else {
+      # When not filtered, use table02 which has rate information
+      rate_data <- crime_data$table02 %>%
+        group_by(!!sym(input$category_level)) %>%
+        summarise(AvgRate = mean(`LGA Rate per 100,000 population`, na.rm = TRUE)) %>%
+        arrange(desc(AvgRate)) %>% head(10) %>%
+        rename(Category = !!sym(input$category_level))
+      plot_ly(rate_data,
+              x = ~AvgRate, y = ~reorder(Category, AvgRate),
+              type = 'bar', orientation = 'h',
+              marker = list(color = 'coral')) %>%
+        layout(title = "Crime Rate by Category (Top 10)",
+               xaxis = list(title = "Rate per 100,000"), yaxis = list(title = ""))
+    }
   })
   
   # Suburbs Analysis
@@ -2744,34 +2873,113 @@ server <- function(input, output, session) {
   
   # Location Types
   output$location_plot <- renderPlotly({
-    location_data <- crime_data$table04 %>%
-      group_by(!!sym(input$location_level)) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE)) %>%
-      rename(Location = !!sym(input$location_level))
-    plot_ly(location_data, x = ~reorder(Location, Total), y = ~Total,
-            type = 'bar', marker = list(color = 'purple')) %>%
-      layout(title = paste("Offences by", input$location_level))
+    tryCatch({
+      # table04 has location data but no suburb info
+      # table03 has suburb info but no location data
+      # So we always use table04 for location plots, regardless of suburb filter
+      location_data <- crime_data$table04
+      suburb_filter <- selected_suburb_filter()
+      
+      if (nrow(location_data) == 0 || !input$location_level %in% names(location_data)) {
+        return(plot_ly() %>% 
+               layout(title = paste("No data available for", input$location_level),
+                      xaxis = list(title = ""), yaxis = list(title = "")))
+      }
+      
+      location_summary <- location_data %>%
+        group_by(!!sym(input$location_level)) %>%
+        summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+        rename(Location = !!sym(input$location_level)) %>%
+        filter(Total > 0)
+      
+      if (nrow(location_summary) == 0) {
+        return(plot_ly() %>% 
+               layout(title = paste("No offences found for", input$location_level),
+                      xaxis = list(title = ""), yaxis = list(title = "")))
+      }
+      
+      # Note: Location data is shown for all suburbs since table04 doesn't have suburb breakdown
+      title_text <- paste("Offences by", input$location_level)
+      if (!is.null(suburb_filter) && suburb_filter != "") {
+        title_text <- paste0(title_text, " (All Suburbs - location breakdown by suburb not available)")
+      }
+      
+      plot_ly(location_summary, x = ~reorder(Location, Total), y = ~Total,
+              type = 'bar', marker = list(color = 'purple')) %>%
+        layout(title = title_text)
+    }, error = function(e) {
+      plot_ly() %>% 
+        layout(title = "Error loading location data",
+               annotations = list(text = paste("Error:", conditionMessage(e)),
+                                x = 0.5, y = 0.5, xref = "paper", yref = "paper",
+                                showarrow = FALSE),
+               xaxis = list(title = ""), yaxis = list(title = ""))
+    })
   })
   
   output$location_sunburst <- renderPlotly({
-    level1 <- crime_data$table04 %>%
-      group_by(`Location Division`) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
-      mutate(labels = `Location Division`, parents = "")
-    level2 <- crime_data$table04 %>%
-      group_by(`Location Division`, `Location Subdivision`) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
-      mutate(labels = `Location Subdivision`, parents = `Location Division`)
-    level3 <- crime_data$table04 %>%
-      group_by(`Location Subdivision`, `Location Group`) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
-      mutate(labels = `Location Group`, parents = `Location Subdivision`)
-    sunburst_data <- bind_rows(level1, level2, level3) %>% select(labels, parents, Total)
-    plot_ly(sunburst_data, labels = ~labels, parents = ~parents, values = ~Total,
-            type = 'sunburst', branchvalues = 'total')
+    tryCatch({
+      # table04 has location data but no suburb info
+      # table03 has suburb info but no location data
+      # So we always use table04 for location hierarchy, regardless of suburb filter
+      location_data <- crime_data$table04
+      suburb_filter <- selected_suburb_filter()
+      required_cols <- c("Location Division", "Location Subdivision", "Location Group")
+      
+      if (nrow(location_data) == 0 || !all(required_cols %in% names(location_data))) {
+        return(plot_ly() %>% 
+               layout(title = "No location data available",
+                      xaxis = list(title = ""), yaxis = list(title = "")))
+      }
+      
+      level1 <- location_data %>%
+        group_by(`Location Division`) %>%
+        summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+        mutate(labels = `Location Division`, parents = "") %>%
+        filter(Total > 0)
+      
+      level2 <- location_data %>%
+        group_by(`Location Division`, `Location Subdivision`) %>%
+        summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+        mutate(labels = `Location Subdivision`, parents = `Location Division`) %>%
+        filter(Total > 0)
+      
+      level3 <- location_data %>%
+        group_by(`Location Subdivision`, `Location Group`) %>%
+        summarise(Total = sum(`Offence Count`, na.rm = TRUE), .groups = 'drop') %>%
+        mutate(labels = `Location Group`, parents = `Location Subdivision`) %>%
+        filter(Total > 0)
+      
+      sunburst_data <- bind_rows(level1, level2, level3) %>% 
+        select(labels, parents, Total) %>%
+        filter(Total > 0)
+      
+      if (nrow(sunburst_data) == 0) {
+        return(plot_ly() %>% 
+               layout(title = "No location data to display",
+                      xaxis = list(title = ""), yaxis = list(title = "")))
+      }
+      
+      # Note: Location data is shown for all suburbs since table04 doesn't have suburb breakdown
+      title_text <- "Location Hierarchy Breakdown"
+      if (!is.null(suburb_filter) && suburb_filter != "") {
+        title_text <- "Location Hierarchy (All Suburbs - breakdown by suburb not available)"
+      }
+      
+      plot_ly(sunburst_data, labels = ~labels, parents = ~parents, values = ~Total,
+              type = 'sunburst', branchvalues = 'total') %>%
+               layout(title = title_text)
+    }, error = function(e) {
+      plot_ly() %>% 
+        layout(title = "Error loading location hierarchy",
+               annotations = list(text = paste("Error:", conditionMessage(e)),
+                               x = 0.5, y = 0.5, xref = "paper", yref = "paper",
+                               showarrow = FALSE),
+               xaxis = list(title = ""), yaxis = list(title = ""))
+    })
   })
   
-  # Investigation
+  # Investigation Status
   output$investigation_pie <- renderPlotly({
     investigation_data <- crime_data$table05 %>%
       group_by(`Investigation Status`) %>%
@@ -2787,7 +2995,8 @@ server <- function(input, output, session) {
       summarise(Total = sum(`Offence Count`, na.rm = TRUE))
     plot_ly(investigation_data,
             x = ~`Investigation Status`, y = ~Total,
-            type = 'bar', marker = list(color = 'indianred'))
+            type = 'bar', marker = list(color = 'indianred')) %>%
+      layout(xaxis = list(title = "Investigation Status"))
   })
   
   output$investigation_table <- renderDT({
@@ -2796,7 +3005,11 @@ server <- function(input, output, session) {
       summarise(`Total Offences` = sum(`Offence Count`, na.rm = TRUE),
                 `Percentage` = round(sum(`Offence Count`, na.rm = TRUE) /
                                        sum(crime_data$table05$`Offence Count`, na.rm = TRUE) * 100, 2))
-    datatable(investigation_data, options = list(pageLength = 10))
+    datatable(investigation_data, 
+              options = list(pageLength = 10, scrollX = TRUE, 
+                            lengthMenu = FALSE,
+                            dom = 'tip'),  # 't' = table, 'i' = info, 'p' = pagination (no 'l' for length, no 'f' for search)
+              rownames = FALSE)
   })
   
   # Drug Offences
@@ -2810,156 +3023,246 @@ server <- function(input, output, session) {
             type = 'bar', marker = list(color = 'darkred'))
   })
   
-  output$drug_type_pie <- renderPlotly({
-    drug_data <- crime_data$table06 %>%
-      group_by(`CSA Drug Type`) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
-    plot_ly(drug_data, labels = ~`CSA Drug Type`, values = ~Total, type = 'pie')
-  })
-  
-  output$drug_category_bar <- renderPlotly({
-    drug_data <- crime_data$table06 %>%
-      group_by(`Offence Subdivision`) %>%
-      summarise(Total = sum(`Offence Count`, na.rm = TRUE))
-    plot_ly(drug_data, y = ~reorder(`Offence Subdivision`, Total),
-            x = ~Total, type = 'bar', orientation = 'h')
-  })
   
   output$data_table <- renderDT({
-    selected_table <- crime_data[[input$table_select]]
-    datatable(selected_table, options = list(pageLength = 25, scrollX = TRUE))
+    # Always use table03 (suburbs table)
+    selected_table <- crime_data$table03
+    
+    # Apply category filter if one is selected
+    category_filter <- if (is.null(input$crime_category_filter)) "all" else input$crime_category_filter
+    if (category_filter != "all") {
+      selected_table <- selected_table %>%
+        filter(
+          case_when(
+            category_filter == "person" ~ grepl("person", `Offence Division`, ignore.case = TRUE),
+            category_filter == "property" ~ grepl("property|deception", `Offence Division`, ignore.case = TRUE),
+            category_filter == "drug" ~ grepl("drug", `Offence Division`, ignore.case = TRUE),
+            category_filter == "public" ~ grepl("public order|security|justice", `Offence Division`, ignore.case = TRUE),
+            TRUE ~ TRUE
+          )
+        )
+    }
+    
+    # Apply suburb filter
+    suburb_filter <- selected_suburb_filter()
+    # Fallback to input if reactive value not set yet
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    if (!is.null(suburb_filter) && suburb_filter != "") {
+      selected_table <- selected_table %>% filter(`Suburb/Town Name` == suburb_filter)
+    }
+    datatable(selected_table, 
+              options = list(pageLength = 10, scrollX = TRUE, 
+                            lengthMenu = FALSE,
+                            dom = 'tip'),  # 't' = table, 'i' = info, 'p' = pagination (no 'l' for length, no 'f' for search)
+              rownames = FALSE)
   })
   
   # --- Melbourne Crime Navigation Logic ---
-  observeEvent(input$nav_crime_map, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Crime Map - Interactive Visualization"),
-        p("Click on markers to see detailed crime statistics for each area. Use the filters on the left to customize the view."),
-        leafletOutput("crime_map", width = "100%", height = 600),
-        br(),
-        h4("Suburb Crime Statistics"),
-        DTOutput("crime_map_table")
-      )
-    })
-  })
-
-  observeEvent(input$nav_overview, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Overview"),
-        br(),
-        fluidRow(
-          column(4, uiOutput("total_offences")),
-          column(4, uiOutput("crime_rate")),
-          column(4, uiOutput("police_region"))
-        ),
-        br(),
-        verbatimTextOutput("overview_summary")
-      )
-    })
+  # Handle suburb filter from map
+  observeEvent(input$map_suburb_filter, {
+    selected_suburb_filter(input$map_suburb_filter)
   })
   
   observeEvent(input$nav_categories, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Offence Categories"),
-        selectInput("category_level", "Category Level:",
-                    choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
-                    selected = "Offence Division"),
-        plotlyOutput("category_plot", height = 500),
-        fluidRow(
-          column(6, plotlyOutput("top_categories", height = 400)),
-          column(6, plotlyOutput("category_rate", height = 400))
-        )
+    current_view("categories")
+    # Ensure filter is set from the input (if it was just set via JavaScript)
+    # Read directly from input first, then update reactive value if needed
+    if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+      selected_suburb_filter(input$map_suburb_filter)
+    }
+    # Get suburb name for title
+    suburb_filter <- selected_suburb_filter()
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    modal_title <- if (!is.null(suburb_filter) && suburb_filter != "") {
+      paste0("Offence Categories (", suburb_filter, ")")
+    } else {
+      "Offence Categories"
+    }
+    # Show categories content in a modal
+    showModal(modalDialog(
+      title = modal_title,
+      uiOutput("categories_modal_content"),
+      size = "l",
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
+  })
+  
+  # Render categories panel content for modal
+  # This should be reactive to selected_suburb_filter changes
+  output$categories_modal_content <- renderUI({
+    # Force reactivity by accessing the reactive value
+    # Also check input$map_suburb_filter as a fallback
+    suburb_filter <- selected_suburb_filter()
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      # Fallback to reading directly from input if reactive value hasn't updated yet
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+        selected_suburb_filter(suburb_filter)  # Update reactive value
+      }
+    }
+    
+    tagList(
+      selectInput("category_level", "Category Level:",
+                  choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
+                  selected = "Offence Division"),
+      plotlyOutput("category_plot", height = 500)
+    )
+  })
+  
+  # Render categories panel content (kept for potential future use)
+  output$categories_panel <- renderUI({
+    suburb_filter <- selected_suburb_filter()
+    filter_text <- if (!is.null(suburb_filter) && suburb_filter != "") {
+      paste0(" (Filtered by: ", suburb_filter, ")")
+    } else {
+      " (Filtered by: All)"
+    }
+    
+    tagList(
+      h3(paste0("Offence Categories", filter_text)),
+      if (!is.null(suburb_filter) && suburb_filter != "") {
+        actionButton("clear_suburb_filter", "Clear Filter", style = "margin-bottom: 10px;")
+      },
+      selectInput("category_level", "Category Level:",
+                  choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
+                  selected = "Offence Division"),
+      plotlyOutput("category_plot", height = 500),
+      fluidRow(
+        column(8, plotlyOutput("top_categories", height = 600)),
+        column(4, plotlyOutput("category_rate", height = 400))
       )
-    })
+    )
+  })
+  
+  observeEvent(input$clear_suburb_filter, {
+    selected_suburb_filter(NULL)
+    # Re-render the current view without the filter
+    view <- current_view()
+    
+    if (view == "categories") {
+      # Trigger re-render of categories modal content
+      output$categories_modal_content <- renderUI({
+        tagList(
+          selectInput("category_level", "Category Level:",
+                      choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
+                      selected = "Offence Division"),
+          plotlyOutput("category_plot", height = 500)
+        )
+      })
+    } else if (view == "tables") {
+      # Trigger re-render of tables modal content
+      output$tables_modal_content <- renderUI({
+        tagList(
+          DTOutput("data_table")
+        )
+      })
+    }
+  })
+  
+  # Handle clear filter from modal
+  observeEvent(input$clear_suburb_filter_modal, {
+    selected_suburb_filter(NULL)
+    view <- current_view()
+    
+    if (view == "categories") {
+      output$categories_modal_content <- renderUI({
+        tagList(
+          selectInput("category_level", "Category Level:",
+                      choices = c("Offence Division", "Offence Subdivision", "Offence Subgroup"),
+                      selected = "Offence Division"),
+          plotlyOutput("category_plot", height = 500)
+        )
+      })
+    } else if (view == "tables") {
+      output$tables_modal_content <- renderUI({
+        tagList(
+          DTOutput("data_table")
+        )
+      })
+    }
   })
   
   observeEvent(input$nav_suburbs, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Suburbs Analysis"),
-        selectInput("suburb_category", "Offence Category:",
-                    choices = c("All", unique(crime_data$table03$`Offence Division`)),
-                    selected = "All"),
-        plotlyOutput("suburb_plot", height = 500),
-        fluidRow(
-          column(6, plotlyOutput("top_suburbs", height = 400)),
-          column(6, plotlyOutput("postcode_plot", height = 400))
-        )
-      )
-    })
+    # Suburbs Analysis can be accessed via tooltip if needed
+    # For now, this handler can be removed or redirected to Overview
+    updateTabsetPanel(session, "crime_tabs", selected = "overview_tab")
   })
   
   observeEvent(input$nav_locations, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Location Types"),
-        selectInput("location_level", "Location Level:",
-                    choices = c("Location Division", "Location Subdivision", "Location Group"),
-                    selected = "Location Division"),
-        plotlyOutput("location_plot", height = 500),
-        plotlyOutput("location_sunburst", height = 600)
-      )
-    })
-  })
-  
-  observeEvent(input$nav_investigation, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Investigation Status"),
-        fluidRow(
-          column(6, plotlyOutput("investigation_pie", height = 400)),
-          column(6, plotlyOutput("investigation_bar", height = 400))
-        ),
-        DTOutput("investigation_table")
-      )
-    })
-  })
-  
-  observeEvent(input$nav_drugs, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Drug Offences"),
-        selectInput("drug_filter", "Drug Filter By:",
-                    choices = c("Offence Subdivision", "Offence Group", "CSA Drug Type"),
-                    selected = "CSA Drug Type"),
-        plotlyOutput("drug_plot", height = 500),
-        fluidRow(
-          column(6, plotlyOutput("drug_type_pie", height = 400)),
-          column(6, plotlyOutput("drug_category_bar", height = 400))
-        )
-      )
-    })
+    # Location types are shown in Overview tab
+    updateTabsetPanel(session, "crime_tabs", selected = "overview_tab")
   })
   
   observeEvent(input$nav_tables, {
-    output$crime_main_panel <- renderUI({
-      tagList(
-        h3("Data Tables"),
-        selectInput("table_select", "Choose Table:",
-                    choices = c("Table 01: Overview" = "table01",
-                                "Table 02: Offence Categories" = "table02",
-                                "Table 03: Suburbs" = "table03",
-                                "Table 04: Location Types" = "table04",
-                                "Table 05: Investigation" = "table05",
-                                "Table 06: Drug Offences" = "table06"),
-                    selected = "table01"),
-        DTOutput("data_table")
-      )
-    })
+    current_view("tables")
+    # Ensure filter is set from the input (if it was just set via JavaScript)
+    if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+      selected_suburb_filter(input$map_suburb_filter)
+    }
+    # Get suburb name for title
+    suburb_filter <- selected_suburb_filter()
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+      }
+    }
+    modal_title <- if (!is.null(suburb_filter) && suburb_filter != "") {
+      paste0("Data Tables (", suburb_filter, ")")
+    } else {
+      "Data Tables"
+    }
+    # Show data tables content in a modal
+    showModal(modalDialog(
+      title = modal_title,
+      uiOutput("tables_modal_content"),
+      size = "l",
+      easyClose = TRUE,
+      footer = modalButton("Close")
+    ))
   })
   
-  # --- Default display (Crime Map when first opened) ---
-  output$crime_main_panel <- renderUI({
+  # Render tables panel content for modal
+  output$tables_modal_content <- renderUI({
+    # Force reactivity by accessing the reactive value
+    # Also check input$map_suburb_filter as a fallback
+    suburb_filter <- selected_suburb_filter()
+    if (is.null(suburb_filter) || suburb_filter == "") {
+      # Fallback to reading directly from input if reactive value hasn't updated yet
+      if (!is.null(input$map_suburb_filter) && input$map_suburb_filter != "") {
+        suburb_filter <- input$map_suburb_filter
+        selected_suburb_filter(suburb_filter)  # Update reactive value
+      }
+    }
+    
     tagList(
-      h3("Crime Map - Interactive Visualization"),
-      p("Click on markers to see detailed crime statistics for each area. Use the filters on the left to customize the view."),
-      leafletOutput("crime_map", width = "100%", height = 600),
-      br(),
-      h4("Suburb Crime Statistics"),
-      DTOutput("crime_map_table")
+      DTOutput("data_table")
+    )
+  })
+  
+  # Render tables panel content (kept for potential future use)
+  output$tables_panel <- renderUI({
+    suburb_filter <- selected_suburb_filter()
+    filter_text <- if (!is.null(suburb_filter) && suburb_filter != "") {
+      paste0(" (Filtered by: ", suburb_filter, ")")
+    } else {
+      " (Filtered by: All)"
+    }
+    
+    tagList(
+      h3(paste0("Data Tables", filter_text)),
+      if (!is.null(suburb_filter) && suburb_filter != "") {
+        actionButton("clear_suburb_filter", "Clear Filter", style = "margin-bottom: 10px;")
+      },
+      DTOutput("data_table")
     )
   })
   
