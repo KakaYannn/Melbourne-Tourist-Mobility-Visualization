@@ -2261,7 +2261,7 @@ server <- function(input, output, session) {
         map <- addCircleMarkers(
           map,
           data = sensors_sf,
-          lng = ~lon, lat = ~lat,
+          lng = ~Longitude, lat = ~Latitude,
           radius = ~scales::rescale(Avg_Count, to = c(3, 15)),
           stroke = TRUE,
           weight = 1,
