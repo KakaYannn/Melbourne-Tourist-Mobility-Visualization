@@ -116,6 +116,174 @@ lines <- lines %>%
 lines <- lines[lines$shortname != 'Replacement Bus', ]
 lines <- rbind(lines, flem)
 
+# Systematic deduplication of stops: first by name similarity, then by location proximity
+# This handles cases like "Melbourne Central Station/Elizabeth St #5" appearing multiple times
+
+# Helper function to normalize names for comparison
+normalize_name_for_grouping <- function(name) {
+  # Remove stop numbers like #5, #D1, #D2, etc. at the end
+  name <- gsub("\\s*#[A-Z0-9]+\\s*$", "", name, perl = TRUE)
+  # Remove any trailing whitespace or punctuation
+  name <- trimws(name)
+  # Convert to uppercase for comparison
+  name <- toupper(name)
+  return(name)
+}
+
+# Step 1: Group stops by normalized name and mode (handles cases where same name appears multiple times)
+# If stops have the same normalized name and mode, they are duplicates regardless of location
+stops$normalized_name <- normalize_name_for_grouping(stops$name)
+stops$group_id <- NA_integer_
+
+# Convert to metric CRS for accurate distance calculations (will be used later)
+stops_proj <- st_transform(stops, 3857)
+
+# Group all stops with same normalized name AND mode together
+# This handles cases like "Melbourne Central Station/Elizabeth St #5" appearing multiple times
+stops_grouped <- stops %>%
+  group_by(normalized_name, mode) %>%
+  mutate(
+    group_id = cur_group_id()  # Assign same group_id to all stops with same normalized name and mode
+  ) %>%
+  ungroup()
+
+stops$group_id <- stops_grouped$group_id
+current_group <- max(stops$group_id, na.rm = TRUE) + 1L
+
+# Step 2: For stops not yet grouped, group by location and name similarity (catch nearby stops with similar names)
+for (i in seq_len(nrow(stops_proj))) {
+  if (!is.na(stops$group_id[i])) next  # Already assigned to a group
+  
+  # Find all stops within 20 meters (more generous threshold)
+  distances <- as.numeric(st_distance(stops_proj[i, ], stops_proj))
+  within_20m <- distances <= 20  # Within 20m (including itself)
+  candidates <- which(within_20m & is.na(stops$group_id))
+  
+  if (length(candidates) > 0) {
+    # Normalize the reference name
+    name_base_i <- stops$normalized_name[i]
+    
+    # Find candidates with similar names
+    similar_names <- sapply(candidates, function(j) {
+      name_j_base <- stops$normalized_name[j]
+      
+      # Strategy 1: Exact match after normalization (handles #5, #D1 variations)
+      if (name_base_i == name_j_base) return(TRUE)
+      
+      # Strategy 2: If names contain "/", compare first part
+      if (grepl("/", name_base_i, fixed = TRUE) && grepl("/", name_j_base, fixed = TRUE)) {
+        parts_i <- strsplit(name_base_i, "/", fixed = TRUE)[[1]]
+        parts_j <- strsplit(name_j_base, "/", fixed = TRUE)[[1]]
+        # Match if first part is identical
+        if (length(parts_i) > 0 && length(parts_j) > 0) {
+          if (trimws(parts_i[1]) == trimws(parts_j[1])) return(TRUE)
+        }
+      }
+      
+      # Strategy 3: Original names are identical
+      if (stops$name[i] == stops$name[j]) return(TRUE)
+      
+      # Strategy 4: If normalized names share a significant prefix (first 20 chars for better matching)
+      if (nchar(name_base_i) >= 20 && nchar(name_j_base) >= 20) {
+        if (substr(name_base_i, 1, 20) == substr(name_j_base, 1, 20)) return(TRUE)
+      }
+      
+      return(FALSE)
+    })
+    
+    # Group by mode as well - same physical location can have tram AND bus stops
+    same_mode <- stops$mode[candidates] == stops$mode[i]
+    
+    # Assign group to stops with similar names and same mode
+    group_members <- candidates[similar_names & same_mode]
+    if (length(group_members) > 0) {
+      stops$group_id[group_members] <- current_group
+      current_group <- current_group + 1L
+    }
+  }
+}
+
+# For each group, keep only one representative stop (prefer name without # markers, then shorter)
+stops_dedup <- stops %>%
+  filter(!is.na(group_id)) %>%
+  mutate(
+    has_marker = grepl("\\s*#[A-Z0-9]+\\s*$", name),  # Prefer names without stop markers
+    name_length = nchar(name)
+  ) %>%
+  group_by(group_id, mode) %>%
+  arrange(has_marker, name_length) %>%  # Prefer names without # markers, then shorter names
+  slice_head(n = 1) %>%  # Take first (best representative)
+  ungroup() %>%
+  select(-group_id, -has_marker, -name_length, -normalized_name)
+
+# Handle any stops that weren't grouped (standalone stops)
+stops_ungrouped <- stops[is.na(stops$group_id), ]
+if (nrow(stops_ungrouped) > 0) {
+  stops_ungrouped <- stops_ungrouped %>% select(-group_id, -normalized_name)
+  stops <- rbind(stops_dedup, stops_ungrouped)
+} else {
+  stops <- stops_dedup
+}
+
+# Final safety deduplication: remove any remaining duplicates by location, mode, and normalized name
+# Use aggressive rounding to catch any remaining duplicates
+stops <- stops %>%
+  mutate(
+    lon_round = round(lon, 3),  # ~100m precision (more aggressive)
+    lat_round = round(lat, 3),
+    name_normalized = normalize_name_for_grouping(name)
+  ) %>%
+  distinct(lon_round, lat_round, mode, name_normalized, .keep_all = TRUE) %>%
+  select(-lon_round, -lat_round, -name_normalized)
+
+# Additional deduplication: if stops have same name, mode, AND routes, keep only one (regardless of distance)
+# First, we need to get lines data for route checking (lines is loaded earlier)
+# Convert stops to projected CRS for distance calculations
+stops_proj_for_routes <- st_transform(stops, 3857)
+lines_proj_for_routes <- st_transform(lines, 3857)
+
+# For each stop, find routes within 30m and create a routes signature
+cat("Finding routes for each stop to check for duplicates...\n")
+routes_signatures <- sapply(seq_len(nrow(stops_proj_for_routes)), function(i) {
+  stop_proj <- stops_proj_for_routes[i, ]
+  # Find lines within 30m with same mode
+  lines_near <- lines_proj_for_routes[
+    as.numeric(st_distance(lines_proj_for_routes, stop_proj)) <= 30 & 
+    lines_proj_for_routes$mode == stop_proj$mode, 
+  ]
+  
+  # Create signature: sorted unique route shortnames
+  if (nrow(lines_near) > 0) {
+    routes <- sort(unique(lines_near$shortname))
+    return(paste(routes, collapse = "|"))
+  } else {
+    return("")  # No routes found
+  }
+})
+
+# Add routes signature to stops
+stops$routes_signature <- routes_signatures
+
+# Group by normalized name + mode + routes signature, keep only one per group
+stops <- stops %>%
+  mutate(name_normalized = normalize_name_for_grouping(name)) %>%
+  group_by(name_normalized, mode, routes_signature) %>%
+  arrange(name) %>%  # Prefer first alphabetically
+  slice_head(n = 1) %>%  # Keep first (preferred name)
+  ungroup() %>%
+  select(-routes_signature, -name_normalized)
+
+cat("Routes-based deduplication complete.\n")
+
+# Deduplicate stations based on coordinates and station name
+stations <- stations %>%
+  mutate(
+    lon_round = round(lon, 6),
+    lat_round = round(lat, 6)
+  ) %>%
+  distinct(lon_round, lat_round, station, .keep_all = TRUE) %>%
+  select(-lon_round, -lat_round)
+
 # add unique id columns
 stops$id <- paste0('stop', seq_len(nrow(stops)))
 stations$id <- paste0('station', seq_len(nrow(stations)))
@@ -1229,7 +1397,7 @@ ui <- navbarPage(
         uiOutput('infopt')
       )
     )
-  ),
+  ), 
   
   
   # --- Parking Tab ---
@@ -1238,13 +1406,13 @@ ui <- navbarPage(
     sidebarLayout(
       sidebarPanel(
         selectInput(
-          inputId = 'type_parking',
+          inputId = 'type',
           label = 'POI Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
-        h4("Select Landmarks for Parking Search"),
-        helpText("Choose one or more landmarks to find nearby parking"),
+        h4("Select Landmarks to Find Nearby Transport"),
+        helpText("Choose one or more landmarks to find nearby PT stops and stations"),
         selectizeInput(
           "lm_name_parking",
           "Landmark(s)",
@@ -1255,7 +1423,7 @@ ui <- navbarPage(
           ),
           multiple = TRUE
         ),
-        sliderInput("radius_m_parking", "Search radius (meters)",
+        sliderInput("radius_m_parking", "Search Radius (Metres):",
                     min = 100, max = 1000, value = 300, step = 50,
                     ticks = TRUE, sep = ""),
         hr(),
@@ -1401,7 +1569,7 @@ ui <- navbarPage(
           selected = 'All'
         ),
         h4("Select Landmarks to Find Nearby Sensors"),
-        helpText("Choose one or more landmarks to find nearby pedestrian sensors"),
+        helpText("Choose one or more landmarks to find nearby pedestrian sensors. The circles you see represent pedestrian counting sensors - larger and darker circles indicate higher pedestrian traffic. Each sensor shows the average daily pedestrian count at that location."),
         selectizeInput(
           "lm_name_pedestrian",
           "Landmark(s)",
@@ -1637,7 +1805,7 @@ server <- function(input, output, session) {
                        stroke = FALSE, 
                        fill = TRUE, 
                        fillColor = ~colour, 
-                       fillOpacity = 0.5, 
+                       fillOpacity = 1.0, 
                        label = ~name, 
                        layerId = ~id, 
                        group = 'pois')
@@ -1925,6 +2093,7 @@ server <- function(input, output, session) {
     map <- clearGroup(map, "Filtered Landmarks")
     map <- clearGroup(map, "Filtered Stops")
     map <- clearGroup(map, "Filtered Stations")
+    map <- clearGroup(map, "linesnear")  # Clear route lines when landmarks change
 
     # Check if user has filter active
     has_filter <- length(input$lm_name_pt) > 0
@@ -2012,6 +2181,15 @@ server <- function(input, output, session) {
           # Reconstruct sf object with only stops that have routes
           stops_with_routes <- do.call(rbind, lapply(stops_with_routes_list, function(x) x$stop))
           stops_with_routes$popup_html <- sapply(stops_with_routes_list, function(x) x$popup)
+          
+          # Final deduplication before adding to map: remove stops at same location
+          stops_with_routes <- stops_with_routes %>%
+            mutate(
+              lon_round = round(lon, 5),
+              lat_round = round(lat, 5)
+            ) %>%
+            distinct(lon_round, lat_round, mode, .keep_all = TRUE) %>%
+            select(-lon_round, -lat_round)
           
           map <- addAwesomeMarkers(
             map,
@@ -2133,7 +2311,7 @@ server <- function(input, output, session) {
         stroke = FALSE, 
         fill = TRUE, 
         fillColor = ~colour, 
-        fillOpacity = 0.5, 
+        fillOpacity = 1.0, 
         label = lapply(paste0(
           "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
           "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
@@ -2372,8 +2550,8 @@ server <- function(input, output, session) {
       buf <- combined_buffer_pedestrian()
       sensors_sf <- sensors_in_radius_pedestrian()
 
-      # Hide "Landmarks" group
-      map <- hideGroup(map, "Landmarks")
+      # Hide "pois" group (all landmarks) when filter is active
+      map <- hideGroup(map, "pois")
 
       # Add buffer zone
       map <- addPolygons(
@@ -2417,6 +2595,14 @@ server <- function(input, output, session) {
 
       # Add filtered pedestrian sensors
       if (nrow(sensors_sf) > 0) {
+        # Create formatted labels with HTML
+        sensors_sf$label_html <- lapply(seq_len(nrow(sensors_sf)), function(i) {
+          htmltools::HTML(paste0(
+            "<b>Pedestrian Sensor:</b> ", htmltools::htmlEscape(sensors_sf$Sensor_Name[i]), "<br/>",
+            "<b>Average Daily Count:</b> ", format(round(sensors_sf$Avg_Count[i]), big.mark = ","), " pedestrians"
+          ))
+        })
+        
         map <- addCircleMarkers(
           map,
           data = sensors_sf,
@@ -2427,7 +2613,11 @@ server <- function(input, output, session) {
           color = "#333333",
           fillOpacity = 0.6,
           fillColor = ~colorNumeric(palette = "YlOrRd", domain = ped_geo$Avg_Count)(Avg_Count),
-          label = ~paste0(Sensor_Name, ": ", format(Avg_Count, big.mark = ",")),
+          label = ~label_html,
+          labelOptions = labelOptions(
+            style = list("font-size" = "12px", "font-family" = "Inter, sans-serif"),
+            direction = "auto"
+          ),
           group = "Filtered Sensors"
         )
         map <- showGroup(map, "Filtered Sensors")
@@ -2437,7 +2627,7 @@ server <- function(input, output, session) {
       # No filter applied - show default groups, hide filtered groups
       map <- hideGroup(map, "Filtered Landmarks")
       map <- hideGroup(map, "Filtered Sensors")
-      map <- showGroup(map, "Landmarks")
+      map <- showGroup(map, "pois")  # Show all landmarks when no filter
       
       # Zoom out to show boundary
       if (nrow(boundary) > 0) {
@@ -3142,7 +3332,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 0.5,
+          fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3224,7 +3414,7 @@ server <- function(input, output, session) {
       landmark_radius <- 7
       landmark_stroke <- FALSE
       landmark_weight <- NULL
-      landmark_fill_opacity <- 0.5
+      landmark_fill_opacity <- 1.0  # Match other tabs - fully opaque
       landmark_color <- NULL
     }
     
@@ -3439,7 +3629,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 0.5,
+                    fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3584,7 +3774,7 @@ server <- function(input, output, session) {
           stroke = FALSE,
           fill = TRUE,
           fillColor = ~colour,
-          fillOpacity = 0.5,
+                    fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
           layerId = ~name,
@@ -3933,7 +4123,13 @@ server <- function(input, output, session) {
       
       plot_ly(sunburst_data, labels = ~labels, parents = ~parents, values = ~Total,
               type = 'sunburst', branchvalues = 'total') %>%
-               layout(title = title_text)
+               layout(
+                 title = list(
+                   text = title_text,
+                   font = list(family = "Inter", size = 12)
+                 ),
+                 font = list(family = "Inter", size = 12)
+               )
     }, error = function(e) {
       plot_ly() %>% 
         layout(title = "Error loading location hierarchy",
@@ -4022,10 +4218,20 @@ server <- function(input, output, session) {
       selected_table <- selected_table %>% filter(`Suburb/Town Name` == suburb_filter)
     }
     datatable(selected_table, 
-              options = list(pageLength = 10, scrollX = TRUE, 
-                            lengthMenu = FALSE,
-                            dom = 'tip'),  # 't' = table, 'i' = info, 'p' = pagination (no 'l' for length, no 'f' for search)
-              rownames = FALSE)
+              options = list(
+                pageLength = 15, 
+                scrollX = TRUE, 
+                scrollY = "500px",  # Fixed height for better control
+                lengthMenu = FALSE,
+                autoWidth = TRUE,  # Auto-size columns based on content
+                columnDefs = list(
+                  list(width = 'auto', targets = '_all')  # All columns auto-width
+                ),
+                dom = 'tip'  # 't' = table, 'i' = info, 'p' = pagination
+              ), 
+              rownames = FALSE,
+              width = "100%"
+            )
   })
   
   # --- Melbourne Crime Navigation Logic ---
@@ -4187,13 +4393,14 @@ server <- function(input, output, session) {
     } else {
       "Data Tables"
     }
-    # Show data tables content in a modal
+    # Show data tables content in a modal with custom size for better table display
     showModal(modalDialog(
       title = modal_title,
       uiOutput("tables_modal_content"),
-      size = "l",
+      size = "xl",  # Use extra-large size for better width
       easyClose = TRUE,
-      footer = modalButton("Close")
+      footer = modalButton("Close"),
+      style = "width: 95%; max-width: 1400px;"  # Custom width to fit table columns
     ))
   })
   
@@ -4211,7 +4418,10 @@ server <- function(input, output, session) {
     }
     
     tagList(
-      DTOutput("data_table")
+      tags$div(
+        style = "width: 100%; overflow-x: auto;",
+        DTOutput("data_table", width = "100%")
+      )
     )
   })
   
