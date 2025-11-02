@@ -169,7 +169,8 @@ These files are not required for the application to run:
 ### Pedestrian Counts Tab
 
 - Heatmap visualization of pedestrian activity
-- Filter by time of day, day of week, and month
+- Shows the Top 15 landmarks ranked by nearby pedestrian volume
+- Visualises time-series trends in pedestrian activity for selected themes.
 - Integration with landmark locations
 - Shows pedestrian sensor locations with count statistics
 
