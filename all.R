@@ -1273,6 +1273,7 @@ ui <- navbarPage(
     danger = "#e74c3c"
   ),
   header = tags$head(
+    tags$link(rel = "stylesheet", href = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"),
     tags$style(HTML("
       * {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -1396,62 +1397,65 @@ ui <- navbarPage(
         tags$div(
           tags$strong("Transport Mode Legend", style = "color: #2c3e50;"),
           tags$div(
-            style = "margin-top: 10px; font-size: 12px;",
+            style = "margin-top: 8px; font-size: 13px;",
             tags$style(HTML("
-              .legend-marker-pt {
+              .pt-legend-marker {
                 display: inline-block;
                 position: relative;
-                width: 25px;
-                height: 35px;
-                margin-right: 4px;
+                width: 20px;
+                height: 28px;
+                margin-right: 6px;
                 vertical-align: middle;
                 border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
-                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.4);
               }
-              .legend-marker-pt.blue {
-                background: #38AADD;
+              .pt-legend-marker.blue {
+                background-color: #38AADD;
+                border: 1px solid #2e8ab8;
               }
-              .legend-marker-pt.green {
-                background: #72B026;
+              .pt-legend-marker.green {
+                background-color: #72B026;
+                border: 1px solid #5a8c1e;
               }
-              .legend-marker-pt.orange {
-                background: #F3952F;
+              .pt-legend-marker.orange {
+                background-color: #F3952F;
+                border: 1px solid #d87b1f;
               }
-              .legend-marker-pt i {
+              .pt-legend-marker i {
                 position: absolute;
                 top: 50%;
                 left: 50%;
                 transform: translate(-50%, -50%) rotate(45deg);
                 color: white;
-                font-size: 11px;
-                font-weight: 900;
+                font-size: 10px;
+                text-shadow: 0 0 2px rgba(0,0,0,0.5);
+              }
+              .pt-legend-item {
+                display: flex;
+                align-items: center;
+                margin-bottom: 4px;
+              }
+              .pt-legend-text {
+                font-weight: 500;
+                margin-left: 2px;
               }
             ")),
-            tags$table(
-              style = "width: 100%; border-collapse: collapse;",
-              tags$tbody(
-                tags$tr(
-                  tags$td(
-                    HTML('<div class="legend-marker-pt blue"><i class="fa fa-subway"></i></div>'),
-                    style = "padding: 2px 4px;"
-                  ),
-                  tags$td(tags$strong("Train"), style = "padding: 2px 4px;")
-                ),
-                tags$tr(
-                  tags$td(
-                    HTML('<div class="legend-marker-pt green"><i class="fa fa-train"></i></div>'),
-                    style = "padding: 2px 4px;"
-                  ),
-                  tags$td(tags$strong("Tram"), style = "padding: 2px 4px;")
-                ),
-                tags$tr(
-                  tags$td(
-                    HTML('<div class="legend-marker-pt orange"><i class="fa fa-bus"></i></div>'),
-                    style = "padding: 2px 4px;"
-                  ),
-                  tags$td(tags$strong("Bus"), style = "padding: 2px 4px;")
-                )
+            tags$div(
+              tags$div(
+                class = "pt-legend-item",
+                HTML('<div class="pt-legend-marker blue"><i class="fas fa-subway"></i></div>'),
+                tags$span(class = "pt-legend-text", "Train")
+              ),
+              tags$div(
+                class = "pt-legend-item",
+                HTML('<div class="pt-legend-marker green"><i class="fas fa-train"></i></div>'),
+                tags$span(class = "pt-legend-text", "Tram")
+              ),
+              tags$div(
+                class = "pt-legend-item",
+                HTML('<div class="pt-legend-marker orange"><i class="fas fa-bus"></i></div>'),
+                tags$span(class = "pt-legend-text", "Bus")
               )
             )
           )
