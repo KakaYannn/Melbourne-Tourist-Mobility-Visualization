@@ -48,3 +48,4 @@ po/*~
 # RStudio Connect folder
 rsconnect/
 public_transport_lines.geojson
+.DS_Store
