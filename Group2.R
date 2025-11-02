@@ -1365,7 +1365,7 @@ ui <- navbarPage(
       sidebarPanel(
         selectInput(
           inputId = 'type',
-          label = 'POI Type',
+          label = 'Landmark Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
@@ -1476,7 +1476,7 @@ ui <- navbarPage(
       sidebarPanel(
         selectInput(
           inputId = 'type_parking',
-          label = 'POI Type',
+          label = 'Landmark Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
@@ -1633,7 +1633,7 @@ ui <- navbarPage(
       sidebarPanel(
         selectInput(
           inputId = 'type_pedestrian',
-          label = 'POI Type',
+          label = 'Landmark Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
@@ -1696,7 +1696,7 @@ ui <- navbarPage(
         width = 3,
         selectInput(
           inputId = 'type_crime',
-          label = 'POI Type',
+          label = 'Landmark Type',
           choices = c('All', unique(pois$subtype)),
           selected = 'All'
         ),
@@ -2507,7 +2507,7 @@ server <- function(input, output, session) {
       layout(
         title = list(
           text = paste0("Pedestrian Flow Over Time — ",
-                        ifelse(input$type_pedestrian == "All", "All POIs", input$type_pedestrian)),
+                        ifelse(input$type_pedestrian == "All", "All Landmarks", input$type_pedestrian)),
           font = list(family = "Inter", size = 14)
         ),
         xaxis = list(
