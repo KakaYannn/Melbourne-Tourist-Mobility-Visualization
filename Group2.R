@@ -2436,8 +2436,8 @@ server <- function(input, output, session) {
     p <- ggplot(df, aes(x = name, y = nearest_count, fill = subtype)) +
       geom_col() +
       coord_flip() +
-      labs(x = "Point of Interest", y = "Avg Pedestrian Count (nearest sensor)",
-           title = "Top 15 POIs by Nearby Pedestrian Volume") +
+      labs(x = "Landmark", y = "Avg Pedestrian Count (nearest sensor)",
+           title = "Top 15 Landmarks by Nearby Pedestrian Volume") +
       theme_minimal(base_size = 12) +
       theme(
         legend.position = "bottom",
@@ -2454,7 +2454,7 @@ server <- function(input, output, session) {
       layout(
         font = list(family = "Inter", size = 12),
         title = list(
-          text = "Top 15 POIs by Nearby Pedestrian Volume",
+          text = "Top 15 Landmarks by Nearby Pedestrian Volume",
           font = list(family = "Inter", size = 14)
         ),
         xaxis = list(
@@ -2462,7 +2462,7 @@ server <- function(input, output, session) {
           tickfont = list(family = "Inter", size = 12)
         ),
         yaxis = list(
-          title = list(text = "Point of Interest", font = list(family = "Inter", size = 12)),
+          title = list(text = "Landmark", font = list(family = "Inter", size = 12)),
           tickfont = list(family = "Inter", size = 12)
         ),
         legend = list(
