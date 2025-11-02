@@ -28,8 +28,8 @@ library(DT)
 
 # --- Map Preprocess ---
 
-# read data
-boundary <- st_read('./municipal-boundary.shp')
+# read data from City of Melbourne Open Data API
+boundary <- st_read('https://data.melbourne.vic.gov.au/explore/dataset/municipal-boundary/download?format=geojson', quiet = TRUE)
 pois <- st_read('./landmarks-and-places-of-interest-including-schools-theatres-health-services-spor.geojson')
 
 # add coord column
