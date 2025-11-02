@@ -62,9 +62,6 @@ poiscolour <- setNames(c('lightblue', 'purple', 'darkpurple', 'black', 'black',
                          'Theatre Live', 'Visitor Centre'))
 pois$colour <- unname(poiscolour[pois$subtype])
 
-# copy dataframe in epsg 3857 for distance measurements
-pois2 <- st_transform(pois, 3857)
-
 
 
 # --- PT Preprocess ---
@@ -1852,34 +1849,40 @@ server <- function(input, output, session) {
   
   # create map
   output$mappt <- renderLeaflet({
-    
     # poi subset
     if (input$type == 'All') {
       currpois <- pois
     } else {
       currpois <- pois[pois$subtype == input$type, ]
     }
-    
-    leaflet() %>%
-      
-      # base map
-      addProviderTiles(providers$CartoDB) %>%
-      
-      # boundary
-      addPolygons(data = boundary, 
-                  color = 'black', 
-                  weight = 3, 
-                  fill = FALSE) %>%
-      
-      # pois
-      addCircleMarkers(., data = currpois, lng = ~lon, lat = ~lat, 
-                       radius = 7, 
-                       stroke = FALSE, 
-                       fill = TRUE, 
-                       fillColor = ~colour, 
-                       fillOpacity = 1.0, 
-                       label = ~name, 
-                       layerId = ~id, 
+
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB)
+
+    # Add boundary with consistent styling
+    if (nrow(boundary) > 0) {
+      bb <- sf::st_bbox(boundary)
+      map <- fitBounds(map,
+                       lng1 = as.numeric(bb["xmin"]),
+                       lat1 = as.numeric(bb["ymin"]),
+                       lng2 = as.numeric(bb["xmax"]),
+                       lat2 = as.numeric(bb["ymax"]))
+      map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
+                         fill = FALSE, group = "Boundary")
+    } else {
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
+    }
+
+    # Add pois
+    map %>%
+      addCircleMarkers(data = currpois, lng = ~lon, lat = ~lat,
+                       radius = 7,
+                       stroke = FALSE,
+                       fill = TRUE,
+                       fillColor = ~colour,
+                       fillOpacity = 1.0,
+                       label = ~name,
+                       layerId = ~id,
                        group = 'pois')
   })
   
@@ -1897,8 +1900,6 @@ server <- function(input, output, session) {
     
     # poi click
     if (startsWith(id, 'poi')) {
-      currpoi <- pois2[pois$id == id, ]
-      
       # Get landmark name from clicked POI
       landmark_name <- pois[pois$id == id, ]$name
       
@@ -2357,33 +2358,39 @@ server <- function(input, output, session) {
   
   # Heatmap View
   output$heatmap <- renderLeaflet({
-    
     # poi subset
     if (input$type_pedestrian == 'All') {
       filtered_landmarks <- landmark_popularity
     } else {
       filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
     }
-    
-    leaflet() %>%
-      
-      # base map
-      addProviderTiles(providers$CartoDB) %>%
-      
-      # boundary
-      addPolygons(data = boundary, 
-                  color = 'black', 
-                  weight = 3, 
-                  fill = FALSE) %>%
-      
-      # pois
+
+    map <- leaflet() %>%
+      addProviderTiles(providers$CartoDB)
+
+    # Add boundary with consistent styling
+    if (nrow(boundary) > 0) {
+      bb <- sf::st_bbox(boundary)
+      map <- fitBounds(map,
+                       lng1 = as.numeric(bb["xmin"]),
+                       lat1 = as.numeric(bb["ymin"]),
+                       lng2 = as.numeric(bb["xmax"]),
+                       lat2 = as.numeric(bb["ymax"]))
+      map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
+                         fill = FALSE, group = "Boundary")
+    } else {
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
+    }
+
+    # Add pois and heatmap
+    map %>%
       addCircleMarkers(
-        ., data = filtered_landmarks, lng = ~lon, lat = ~lat,
-        radius = 7, 
-        stroke = FALSE, 
-        fill = TRUE, 
-        fillColor = ~colour, 
-        fillOpacity = 1.0, 
+        data = filtered_landmarks, lng = ~lon, lat = ~lat,
+        radius = 7,
+        stroke = FALSE,
+        fill = TRUE,
+        fillColor = ~colour,
+        fillOpacity = 1.0,
         label = lapply(paste0(
           "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
           "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
@@ -2395,8 +2402,6 @@ server <- function(input, output, session) {
         layerId = ~id,
         group = 'pois'
       ) %>%
-      
-      # heatmap
       addHeatmap(
         data = ped_geo,
         lng = ~Longitude, lat = ~Latitude,
@@ -3332,15 +3337,23 @@ server <- function(input, output, session) {
       )
     }
     
-    # Create a base map centered on Melbourne (same as other tabs)
+    # Create a base map with consistent boundary styling
     map <- leaflet() %>%
-      addProviderTiles(providers$CartoDB) %>%
-      setView(lng = 144.9631, lat = -37.8136, zoom = 13) %>%
-      # Add boundary (same as other tabs)
-      addPolygons(data = boundary,
-                  color = 'black',
-                  weight = 3,
-                  fill = FALSE)
+      addProviderTiles(providers$CartoDB)
+
+    # Add boundary with consistent styling
+    if (nrow(boundary) > 0) {
+      bb <- sf::st_bbox(boundary)
+      map <- fitBounds(map,
+                       lng1 = as.numeric(bb["xmin"]),
+                       lat1 = as.numeric(bb["ymin"]),
+                       lng2 = as.numeric(bb["xmax"]),
+                       lat2 = as.numeric(bb["ymax"]))
+      map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
+                         fill = FALSE, group = "Boundary")
+    } else {
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
+    }
     
     # Add crime suburb polygons FIRST (so landmarks can be on top)
     # Add landmarks by default (on separate "All Landmarks" layer)
