@@ -2345,8 +2345,13 @@ server <- function(input, output, session) {
       map <- hideGroup(map, "Filtered Stations")
       map <- showGroup(map, "pois")
       
-      # Don't call fitBounds here - let initial render handle it
-      # This prevents zoom change on initial load
+      # Zoom out to show boundary (when user clears selection)
+      # ignoreInit = TRUE ensures this doesn't fire on initial load
+      if (nrow(boundary) > 0) {
+        bounds <- sf::st_bbox(boundary)
+        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
+                         options = list(padding = c(50, 50)))
+      }
     }
   }, ignoreInit = TRUE)
   
