@@ -2214,7 +2214,6 @@ server <- function(input, output, session) {
         color = "#fff",
         label = ~name,
         popup = ~popup_text,
-        layerId = ~id,
         group = "Filtered Landmarks"
       )
       
@@ -2673,7 +2672,6 @@ server <- function(input, output, session) {
         color = "#fff",
         label = ~name,
         popup = ~popup_text,
-        layerId = ~id,
         group = "Filtered Landmarks"
       )
       
@@ -2734,9 +2732,10 @@ server <- function(input, output, session) {
     if (is.null(click$id)) return()
     
     # Check if clicked marker is a landmark (POIs start with 'poi')
-    if (startsWith(click$id, 'poi')) {
+    id <- click$id
+    if (startsWith(id, 'poi')) {
       # Get landmark name from clicked POI
-      landmark_name <- pois[pois$id == click$id, ]$name
+      landmark_name <- pois[pois$id == id, ]$name
       
       # Get current selections and add clicked landmark if not already selected
       current_selection <- input$lm_name_pedestrian
