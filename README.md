@@ -6,8 +6,8 @@ This project is a **Tableau dashboard with embedded Shiny elements** that visual
 
 The project consists of:
 - **Tableau Dashboard** (`IV project.twb`): Main visualization interface
-- **R Shiny Application** (`all.R`): Interactive web components embedded within Tableau
-- **Data Files**: Geospatial and statistical datasets from official Melbourne government sources
+- **R Shiny Application** (`Group2.R`): Interactive web components embedded within Tableau
+- **Data Files** (`data/` folder): Geospatial and statistical datasets from official Melbourne government sources
 
 ## How to Launch the Interface (For Markers)
 
@@ -51,7 +51,7 @@ install.packages(c("shiny", "sf", "lwgeom", "dplyr", "tidyr",
 3. Run the application:
    ```r
    # Option 1: Source and run
-   source('all.R')
+   source('Group2.R')
 
    # Option 2: Run directly
    shiny::runApp()
@@ -105,39 +105,42 @@ plotly
 
 The following files must remain in the project directory:
 
-#### Application Files
+#### Application Files (Project Root)
 
 **IV project.twb** (15 KB)
 - Main Tableau dashboard containing embedded Shiny visualizations
 - Primary interface for project assessment
 
-**all.R** (166 KB)
+**Group2.R** (166 KB)
 - R Shiny application file
 - Can be run standalone or embedded in Tableau
 - Provides interactive mapping and filtering functionality
 
-#### Data Files
+**README.md** (9 KB)
+- Project documentation and launch instructions
+
+#### Data Files (data/ folder)
 
 **Boundary Data:**
 - Loaded via API: https://data.melbourne.vic.gov.au (City of Melbourne boundary)
 - No local boundary files required (replaced with API call)
 
-**landmarks-and-places-of-interest-including-schools-theatres-health-services-spor.geojson** (51 KB)
+**data/landmarks-and-places-of-interest-including-schools-theatres-health-services-spor.geojson** (51 KB)
 - 242 landmark locations across Melbourne
 - Used across all visualization tabs
 
 **Public Transport Data:**
-- `public_transport_stops.geojson` (7.0 MB) - 29,202 PT stops
-- `public_transport_lines.geojson` (362 MB) - 10,700 route segments
-- `annual_metropolitan_train_station_entries_fy_2024_2025.csv` (21 KB) - Patronage data
+- `data/public_transport_stops.geojson` (7.0 MB) - 29,202 PT stops
+- `data/public_transport_lines.geojson` (362 MB) - 10,700 route segments
+- `data/annual_metropolitan_train_station_entries_fy_2024_2025.csv` (21 KB) - Patronage data
 
 **Pedestrian Data:**
-- `pedestrian-counting-system-monthly-counts-per-hour.xlsx` (57 MB) - Historical counts
-- `pedestrian-counting-system-sensor-locations.csv` (19 KB) - Sensor locations
+- `data/pedestrian-counting-system-monthly-counts-per-hour.xlsx` (57 MB) - Historical counts
+- `data/pedestrian-counting-system-sensor-locations.csv` (19 KB) - Sensor locations
 
 **Crime Data:**
-- `Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx` (18 MB) - Crime statistics
-- `vic_suburbs.geojson.backup` (2.8 MB) - Suburb boundaries (fallback)
+- `data/Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx` (18 MB) - Crime statistics
+- `data/vic_suburbs.geojson.backup` (2.8 MB) - Suburb boundaries (fallback)
 
 ### Optional/Deletable Files
 
@@ -145,9 +148,13 @@ These files are not required for the application to run:
 
 - `people.csv` (76 MB) - Not referenced in code
 - `landmark.xlsx` (23 KB) - Replaced by GeoJSON version
-- `FINAL_FIXES_SUMMARY.md` - Development notes
+- Development notes and documentation files
 
 **Total project size (required files only): ~451 MB**
+
+**Project Organization:**
+- Application files: `Group2.R`, `IV project.twb`, `README.md` (project root)
+- Data files: All datasets in `data/` subfolder
 
 ## Application Features
 
@@ -240,7 +247,7 @@ The application loads the Melbourne municipal boundary via API instead of local 
 
 **Problem:** Shiny components not appearing
 - **Solution:** Verify R and required packages are installed
-- Check that `all.R` is in the same directory as the Tableau workbook
+- Check that `Group2.R` is in the same directory as the Tableau workbook
 
 ### Shiny Application Issues
 
