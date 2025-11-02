@@ -1850,7 +1850,8 @@ server <- function(input, output, session) {
   # create map
   output$mappt <- renderLeaflet({
     # Use filtered_pois_pt to get all landmarks (same logic as parking)
-    filtered_pois <- filtered_pois_pt()
+    # Isolate reactive to prevent re-renders during initial load
+    filtered_pois <- isolate(filtered_pois_pt())
 
     map <- leaflet() %>%
       addProviderTiles(providers$CartoDB)
@@ -1872,15 +1873,17 @@ server <- function(input, output, session) {
     # Add pois (same structure as parking)
     if (nrow(filtered_pois) > 0) {
       map <- map %>%
-        addCircleMarkers(data = filtered_pois, lng = ~lon, lat = ~lat,
-                         radius = 7,
-                         stroke = FALSE,
-                         fill = TRUE,
-                         fillColor = ~colour,
-                         fillOpacity = 1.0,
-                         label = ~name,
-                         layerId = ~id,
-                         group = 'pois')
+        addCircleMarkers(
+          data = filtered_pois, lng = ~lon, lat = ~lat,
+          radius = 7,
+          stroke = FALSE,
+          fill = TRUE,
+          fillColor = ~colour,
+          fillOpacity = 1.0,
+          label = ~name,
+          layerId = ~id,
+          group = 'pois'
+        )
     }
     
     map
@@ -2342,14 +2345,10 @@ server <- function(input, output, session) {
       map <- hideGroup(map, "Filtered Stations")
       map <- showGroup(map, "pois")
       
-      # Zoom out to show boundary
-      if (nrow(boundary) > 0) {
-        bounds <- sf::st_bbox(boundary)
-        map <- fitBounds(map, bounds[["xmin"]], bounds[["ymin"]], bounds[["xmax"]], bounds[["ymax"]],
-                         options = list(padding = c(50, 50)))
-      }
+      # Don't call fitBounds here - let initial render handle it
+      # This prevents zoom change on initial load
     }
-  })
+  }, ignoreInit = TRUE)
   
   # Update landmarks on map when PT POI type changes (same logic as parking)
   observeEvent(input$type, {
@@ -2376,7 +2375,7 @@ server <- function(input, output, session) {
         group = 'pois'
       )
     }
-  })
+  }, ignoreInit = TRUE)
   
   
   
