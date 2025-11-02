@@ -1849,12 +1849,8 @@ server <- function(input, output, session) {
   
   # create map
   output$mappt <- renderLeaflet({
-    # poi subset
-    if (input$type == 'All') {
-      currpois <- pois
-    } else {
-      currpois <- pois[pois$subtype == input$type, ]
-    }
+    # Use filtered_pois_pt to get all landmarks (same logic as parking)
+    filtered_pois <- filtered_pois_pt()
 
     map <- leaflet() %>%
       addProviderTiles(providers$CartoDB)
@@ -1873,17 +1869,21 @@ server <- function(input, output, session) {
       map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
     }
 
-    # Add pois
-    map %>%
-      addCircleMarkers(data = currpois, lng = ~lon, lat = ~lat,
-                       radius = 7,
-                       stroke = FALSE,
-                       fill = TRUE,
-                       fillColor = ~colour,
-                       fillOpacity = 1.0,
-                       label = ~name,
-                       layerId = ~id,
-                       group = 'pois')
+    # Add pois (same structure as parking)
+    if (nrow(filtered_pois) > 0) {
+      map <- map %>%
+        addCircleMarkers(data = filtered_pois, lng = ~lon, lat = ~lat,
+                         radius = 7,
+                         stroke = FALSE,
+                         fill = TRUE,
+                         fillColor = ~colour,
+                         fillOpacity = 1.0,
+                         label = ~name,
+                         layerId = ~id,
+                         group = 'pois')
+    }
+    
+    map
   })
   
   # on click
@@ -2351,18 +2351,41 @@ server <- function(input, output, session) {
     }
   })
   
+  # Update landmarks on map when PT POI type changes (same logic as parking)
+  observeEvent(input$type, {
+    # Only update if we're on the Public Transport tab
+    if (is.null(input$mypage) || input$mypage != "Public Transport") return()
+    
+    filtered_pois <- filtered_pois_pt()
+    
+    map <- leafletProxy("mappt")
+    map <- clearGroup(map, "pois")
+    
+    if (nrow(filtered_pois) > 0) {
+      map <- addCircleMarkers(
+        map,
+        data = filtered_pois,
+        lng = ~lon, lat = ~lat,
+        radius = 7,
+        stroke = FALSE,
+        fill = TRUE,
+        fillColor = ~colour,
+        fillOpacity = 1.0,
+        label = ~name,
+        layerId = ~id,
+        group = 'pois'
+      )
+    }
+  })
+  
   
   
   # --- Pedestrian Visualisations ---
   
   # Heatmap View
   output$heatmap <- renderLeaflet({
-    # poi subset
-    if (input$type_pedestrian == 'All') {
-      filtered_landmarks <- landmark_popularity
-    } else {
-      filtered_landmarks <- landmark_popularity[landmark_popularity$subtype == input$type_pedestrian, ]
-    }
+    # Use filtered_pois_pedestrian to get all landmarks (same logic as parking)
+    filtered_pois <- filtered_pois_pedestrian()
 
     map <- leaflet() %>%
       addProviderTiles(providers$CartoDB)
@@ -2381,26 +2404,24 @@ server <- function(input, output, session) {
       map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
     }
 
-    # Add pois and heatmap
-    map %>%
-      addCircleMarkers(
-        data = filtered_landmarks, lng = ~lon, lat = ~lat,
-        radius = 7,
-        stroke = FALSE,
-        fill = TRUE,
-        fillColor = ~colour,
-        fillOpacity = 1.0,
-        label = lapply(paste0(
-          "<b>Landmark:</b> ", ifelse(!is.null(filtered_landmarks$name), filtered_landmarks$name, filtered_landmarks$subtype), "<br/>",
-          "<b>Average Pedestrian Count:</b> ", format(round(filtered_landmarks$nearest_count), big.mark = ",")
-        ), htmltools::HTML),
-        labelOptions = labelOptions(
-          style = list("font-size" = "12px", "font-family" = "Arial"),
-          direction = "auto"
-        ),
-        layerId = ~id,
-        group = 'pois'
-      ) %>%
+    # Add pois (same structure as parking)
+    if (nrow(filtered_pois) > 0) {
+      map <- map %>%
+        addCircleMarkers(
+          data = filtered_pois, lng = ~lon, lat = ~lat,
+          radius = 7,
+          stroke = FALSE,
+          fill = TRUE,
+          fillColor = ~colour,
+          fillOpacity = 1.0,
+          label = ~name,
+          layerId = ~id,
+          group = 'pois'
+        )
+    }
+    
+    # Add heatmap
+    map <- map %>%
       addHeatmap(
         data = ped_geo,
         lng = ~Longitude, lat = ~Latitude,
@@ -2409,6 +2430,8 @@ server <- function(input, output, session) {
         gradient = c("navy", "cyan", "yellow", "orange", "red"),
         group = "Pedestrian Heatmap"
       )
+    
+    map
   })
   
   # Ranking View
@@ -2762,6 +2785,33 @@ server <- function(input, output, session) {
     }
   })
   
+  # Update landmarks on map when Pedestrian POI type changes (same logic as parking)
+  observeEvent(input$type_pedestrian, {
+    # Only update if we're on the Pedestrian Counts tab
+    if (is.null(input$mypage) || input$mypage != "Pedestrian Counts") return()
+    
+    filtered_pois <- filtered_pois_pedestrian()
+    
+    map <- leafletProxy("heatmap")
+    map <- clearGroup(map, "pois")
+    
+    if (nrow(filtered_pois) > 0) {
+      map <- addCircleMarkers(
+        map,
+        data = filtered_pois,
+        lng = ~lon, lat = ~lat,
+        radius = 7,
+        stroke = FALSE,
+        fill = TRUE,
+        fillColor = ~colour,
+        fillOpacity = 1.0,
+        label = ~name,
+        layerId = ~id,
+        group = 'pois'
+      )
+    }
+  })
+  
   # --- Parking Visualisations ---
   
   # Filtered POIs by type
@@ -2842,7 +2892,7 @@ server <- function(input, output, session) {
   
   # Initial map with all landmarks shown
   output$map_parking <- renderLeaflet({
-    map <- leaflet(options = leafletOptions(minZoom = 11)) |>
+    map <- leaflet() |>
       addProviderTiles(providers$CartoDB.Positron)
     
     if (nrow(boundary) > 0) {
@@ -2855,7 +2905,7 @@ server <- function(input, output, session) {
       map <- addPolygons(map, data = boundary, weight = 2, color = "#222",
                          fill = FALSE, group = "Boundary")
     } else {
-      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
+      map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
     }
     
     # Show filtered landmarks by default (small dark blue markers)
@@ -3156,7 +3206,7 @@ server <- function(input, output, session) {
                          lng2 = as.numeric(bb["xmax"]),
                          lat2 = as.numeric(bb["ymax"]))
       } else {
-        map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 12)
+        map <- setView(map, lng = 144.9631, lat = -37.8136, zoom = 13)
       }
     }
   })
@@ -3415,8 +3465,10 @@ server <- function(input, output, session) {
     }
     
     # Add landmarks AFTER polygons so they're on top and clickable
-    if (nrow(pois) > 0) {
-      pois_popup <- pois
+    # Use filtered_pois_crime to respect POI type filter, same logic as parking/transport
+    filtered_pois <- filtered_pois_crime()
+    if (nrow(filtered_pois) > 0) {
+      pois_popup <- filtered_pois
       pois_popup$popup_text <- paste0("<b>", pois_popup$name, "</b><br>Category: ", pois_popup$subtype)
       map <- map %>%
         addCircleMarkers(
@@ -3429,7 +3481,7 @@ server <- function(input, output, session) {
           fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
-          layerId = ~name,
+          layerId = ~id,
           group = 'All Landmarks',
           options = markerOptions(zIndexOffset = 1000)  # Put markers on top so they're clickable
         )
@@ -3600,7 +3652,7 @@ server <- function(input, output, session) {
               color = landmark_color,
               label = ~name,
               popup = ~popup_text,
-              layerId = ~name,
+              layerId = ~id,
               group = landmark_group,
               options = markerOptions(zIndexOffset = 1000)  # Put markers on top
             ) %>%
@@ -3618,7 +3670,7 @@ server <- function(input, output, session) {
               fillOpacity = landmark_fill_opacity,
               label = ~name,
               popup = ~popup_text,
-              layerId = ~name,
+              layerId = ~id,
               group = landmark_group,
               options = markerOptions(zIndexOffset = 1000)  # Put markers on top
             ) %>%
@@ -3698,7 +3750,7 @@ server <- function(input, output, session) {
           color = "#fff",
           label = ~name,
           popup = ~popup_text,
-          layerId = ~name,
+          layerId = ~id,
           group = "Filtered Landmarks",
           options = markerOptions(zIndexOffset = 1000)  # Put markers on top
         )
@@ -3726,7 +3778,7 @@ server <- function(input, output, session) {
           fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
-          layerId = ~name,
+          layerId = ~id,
           group = "All Landmarks",
           options = markerOptions(zIndexOffset = 1000)  # Put markers on top
         )
@@ -3748,15 +3800,18 @@ server <- function(input, output, session) {
     if (is.null(click$id)) return()
     
     # Check if clicked marker is a landmark (not a suburb polygon)
-    # Suburbs use their suburb_name as id, landmarks use their name
-    # We can identify landmarks by checking if they exist in pois
-    if (!is.null(click$id) && click$id %in% pois$name) {
-      # Update the landmark selection dropdown
-      updateSelectizeInput(
-        session,
-        "lm_name_crime",
-        selected = click$id
-      )
+    # Landmarks use their id (poi*) as layerId, suburbs use their suburb_name
+    if (!is.null(click$id) && startsWith(click$id, 'poi')) {
+      # Get landmark name from clicked POI
+      landmark_name <- pois[pois$id == click$id, ]$name
+      if (length(landmark_name) > 0 && !is.na(landmark_name)) {
+        # Update the landmark selection dropdown
+        updateSelectizeInput(
+          session,
+          "lm_name_crime",
+          selected = landmark_name
+        )
+      }
     }
   })
   
@@ -3841,7 +3896,7 @@ server <- function(input, output, session) {
           color = "#fff",
           label = ~name,
           popup = ~popup_text,
-          layerId = ~name,
+          layerId = ~id,
           group = "Filtered Landmarks",
           options = markerOptions(zIndexOffset = 1000)  # Put markers on top
         )
@@ -3871,7 +3926,7 @@ server <- function(input, output, session) {
           fillOpacity = 1.0,
           label = ~name,
           popup = ~popup_text,
-          layerId = ~name,
+          layerId = ~id,
           group = "All Landmarks",
           options = markerOptions(zIndexOffset = 1000)  # Put markers on top
         )
