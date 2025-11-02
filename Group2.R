@@ -46,10 +46,10 @@ pois[pois$type == 'Mixed Use', c('type', 'subtype')] <- 'Retail'
 pois$id <- paste0('poi', seq_len(nrow(pois)))
 
 # add colours and icons for pois
-poiscolour <- setNames(c('lightblue', 'purple', 'darkpurple', 'black', 'black', 
+poiscolour <- setNames(c('lightblue', 'purple', 'purple', 'black', 'black', 
                          'purple', 'beige', 'purple', 'red', 'pink', 
-                         'cadetblue', 'lightred', 'black', 'pink', 'darkred', 
-                         'lightgreen', 'lightred', 'darkgreen', 'red', 'lightblue', 
+                         'cadetblue', 'red', 'black', 'pink', 'darkred', 
+                         'lightgreen', 'red', 'darkgreen', 'red', 'lightblue', 
                          'cadetblue', 'lightgreen', 'darkblue', 'red', 'darkgreen', 
                          'pink', 'red', 'beige', 'darkred', 'black', 
                          'purple', 'beige'), 
