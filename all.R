@@ -1396,35 +1396,35 @@ ui <- navbarPage(
         tags$div(
           tags$strong("Transport Mode Legend", style = "color: #2c3e50;"),
           tags$div(
-            style = "margin-top: 10px; font-size: 12px; line-height: 1.8;",
+            style = "margin-top: 10px; font-size: 12px;",
             tags$style(HTML("
-              .legend-marker {
+              .legend-marker-pt {
                 display: inline-block;
                 position: relative;
                 width: 25px;
                 height: 35px;
-                margin-right: 8px;
+                margin-right: 4px;
                 vertical-align: middle;
                 border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
                 box-shadow: 0 2px 4px rgba(0,0,0,0.3);
               }
-              .legend-marker-train {
-                background: #3388ff;
+              .legend-marker-pt.blue {
+                background: #38AADD;
               }
-              .legend-marker-tram {
-                background: #2db52d;
+              .legend-marker-pt.green {
+                background: #72B026;
               }
-              .legend-marker-bus {
-                background: #ff8800;
+              .legend-marker-pt.orange {
+                background: #F3952F;
               }
-              .legend-marker i {
+              .legend-marker-pt i {
                 position: absolute;
                 top: 50%;
                 left: 50%;
                 transform: translate(-50%, -50%) rotate(45deg);
                 color: white;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 900;
               }
             ")),
@@ -1433,24 +1433,24 @@ ui <- navbarPage(
               tags$tbody(
                 tags$tr(
                   tags$td(
-                    HTML('<div class="legend-marker legend-marker-train"><i class="fa fa-subway"></i></div>'),
-                    style = "padding: 4px 8px;"
+                    HTML('<div class="legend-marker-pt blue"><i class="fa fa-subway"></i></div>'),
+                    style = "padding: 2px 4px;"
                   ),
-                  tags$td(tags$strong("Train"), style = "padding: 4px 8px;")
+                  tags$td(tags$strong("Train"), style = "padding: 2px 4px;")
                 ),
                 tags$tr(
                   tags$td(
-                    HTML('<div class="legend-marker legend-marker-tram"><i class="fa fa-train"></i></div>'),
-                    style = "padding: 4px 8px;"
+                    HTML('<div class="legend-marker-pt green"><i class="fa fa-train"></i></div>'),
+                    style = "padding: 2px 4px;"
                   ),
-                  tags$td(tags$strong("Tram"), style = "padding: 4px 8px;")
+                  tags$td(tags$strong("Tram"), style = "padding: 2px 4px;")
                 ),
                 tags$tr(
                   tags$td(
-                    HTML('<div class="legend-marker legend-marker-bus"><i class="fa fa-bus"></i></div>'),
-                    style = "padding: 4px 8px;"
+                    HTML('<div class="legend-marker-pt orange"><i class="fa fa-bus"></i></div>'),
+                    style = "padding: 2px 4px;"
                   ),
-                  tags$td(tags$strong("Bus"), style = "padding: 4px 8px;")
+                  tags$td(tags$strong("Bus"), style = "padding: 2px 4px;")
                 )
               )
             )
