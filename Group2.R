@@ -47,12 +47,12 @@ pois$id <- paste0('poi', seq_len(nrow(pois)))
 
 # add colours and icons for pois
 poiscolour <- setNames(c('lightblue', 'purple', 'purple', 'black', 'black', 
-                         'purple', 'beige', 'purple', 'red', 'pink', 
+                         'purple', 'yellow', 'purple', 'red', 'pink', 
                          'cadetblue', 'red', 'black', 'pink', 'darkred', 
-                         'lightgreen', 'red', 'darkgreen', 'red', 'lightblue', 
+                         'lightgreen', 'pink', 'darkgreen', 'red', 'lightblue', 
                          'cadetblue', 'lightgreen', 'darkblue', 'red', 'darkgreen', 
-                         'pink', 'red', 'beige', 'darkred', 'black', 
-                         'purple', 'beige'), 
+                         'pink', 'red', 'yellow', 'darkred', 'black', 
+                         'purple', 'yellow'), 
                        c('Aquarium', 'Art Gallery/Museum', 'Casino', 'Cemetery', 'Church', 
                          'Cinema', 'Department Store', 'Film & RV Studio', 'Fire Station', 'Function/Conference/Exhibition Centre', 
                          'Government Building', 'Gymnasium/Health Club', 'Hostel', 'Indoor Recreation Facility', 'Industrial (Manufacturing)', 
