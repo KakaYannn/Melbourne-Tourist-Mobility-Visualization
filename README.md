@@ -142,16 +142,6 @@ The following files must remain in the project directory:
 - `data/Data_Tables_LGA_Recorded_Offences_Year_Ending_June_2025.xlsx` (18 MB) - Crime statistics
 - `data/vic_suburbs.geojson.backup` (2.8 MB) - Suburb boundaries (fallback)
 
-### Optional/Deletable Files
-
-These files are not required for the application to run:
-
-- `people.csv` (76 MB) - Not referenced in code
-- `landmark.xlsx` (23 KB) - Replaced by GeoJSON version
-- Development notes and documentation files
-
-**Total project size (required files only): ~451 MB**
-
 **Project Organization:**
 - Application files: `Group2.R`, `IV project.twb`, `README.md` (project root)
 - Data files: All datasets in `data/` subfolder
@@ -274,7 +264,7 @@ The application loads the Melbourne municipal boundary via API instead of local 
 
 ## Academic Context
 
-This application was developed as part of GEOM90007 (Geospatial Information Systems and Cartography) coursework. The hybrid Tableau-Shiny architecture demonstrates integration of business intelligence tools with custom geospatial analysis capabilities.
+This application was developed as part of GEOM90007 coursework. The hybrid Tableau-Shiny architecture demonstrates integration of business intelligence tools with custom geospatial analysis capabilities.
 
 ## Contact and Support
 
