@@ -1392,6 +1392,70 @@ ui <- navbarPage(
           step = 50,
           ticks = TRUE
         ),
+        hr(),
+        tags$div(
+          tags$strong("Transport Mode Legend", style = "color: #2c3e50;"),
+          tags$div(
+            style = "margin-top: 10px; font-size: 12px; line-height: 1.8;",
+            tags$style(HTML("
+              .legend-marker {
+                display: inline-block;
+                position: relative;
+                width: 25px;
+                height: 35px;
+                margin-right: 8px;
+                vertical-align: middle;
+                border-radius: 50% 50% 50% 0;
+                transform: rotate(-45deg);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+              }
+              .legend-marker-train {
+                background: #3388ff;
+              }
+              .legend-marker-tram {
+                background: #2db52d;
+              }
+              .legend-marker-bus {
+                background: #ff8800;
+              }
+              .legend-marker i {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) rotate(45deg);
+                color: white;
+                font-size: 12px;
+                font-weight: 900;
+              }
+            ")),
+            tags$table(
+              style = "width: 100%; border-collapse: collapse;",
+              tags$tbody(
+                tags$tr(
+                  tags$td(
+                    HTML('<div class="legend-marker legend-marker-train"><i class="fa fa-subway"></i></div>'),
+                    style = "padding: 4px 8px;"
+                  ),
+                  tags$td(tags$strong("Train"), style = "padding: 4px 8px;")
+                ),
+                tags$tr(
+                  tags$td(
+                    HTML('<div class="legend-marker legend-marker-tram"><i class="fa fa-train"></i></div>'),
+                    style = "padding: 4px 8px;"
+                  ),
+                  tags$td(tags$strong("Tram"), style = "padding: 4px 8px;")
+                ),
+                tags$tr(
+                  tags$td(
+                    HTML('<div class="legend-marker legend-marker-bus"><i class="fa fa-bus"></i></div>'),
+                    style = "padding: 4px 8px;"
+                  ),
+                  tags$td(tags$strong("Bus"), style = "padding: 4px 8px;")
+                )
+              )
+            )
+          )
+        ),
         width = 3,
         style = 'max-width: 400px'
       ), 
