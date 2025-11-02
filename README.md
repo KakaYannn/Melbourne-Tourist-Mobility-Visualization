@@ -25,7 +25,7 @@ This is the primary interface for assessment.
 3. **View the Dashboard**
    - The dashboard will load with all visualizations
    - Embedded Shiny components will be visible within the Tableau interface
-   - (Make sure the R shiny tab is opened when loading the Tableau file
+   - (Make sure the R shiny tab is opened when loading the Tableau file)
 
 ### Method 2: Launch Shiny Application Standalone
 
