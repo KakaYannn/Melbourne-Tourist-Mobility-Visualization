@@ -11,69 +11,22 @@ The project consists of:
 
 ## How to Launch the Interface (For Markers)
 
-### Method 1: Launch Tableau Dashboard (Recommended)
+1. **Open Group2.R in RStudio and click Run App**
 
-This is the primary interface for assessment.
-
-1. **Open Tableau Desktop**
-   - Ensure Tableau Desktop 2020.4 or later is installed
-
-2. **Open the Project File**
-   - Double-click `IV project.twb` or
-   - Open Tableau Desktop and select File > Open > `IV project.twb`
+2. **Open IV Project.twb in Tableau**
 
 3. **View the Dashboard**
    - The dashboard will load with all visualizations
    - Embedded Shiny components will be visible within the Tableau interface
-   - (Make sure the R shiny tab is opened when loading the Tableau file)
-
-### Method 2: Launch Shiny Application Standalone
-
-For testing individual Shiny components outside of Tableau.
-
-**Prerequisites:**
-
-Ensure you have R (version 4.0 or higher) installed with the following packages:
-
-```r
-# Install required packages
-install.packages(c("shiny", "sf", "lwgeom", "dplyr", "tidyr",
-                   "readxl", "janitor", "DT", "leaflet",
-                   "leaflet.extras", "ggplot2", "plotly"))
-```
-
-**Running the Shiny App:**
-
-1. Open R or RStudio
-2. Set your working directory to the project folder:
-   ```r
-   setwd("/path/to/GEOM90007-project")
-   ```
-3. Run the application:
-   ```r
-   # Option 1: Source and run
-   source('Group2.R')
-
-   # Option 2: Run directly
-   shiny::runApp()
-   ```
-
-4. The application will open in your default web browser
-
-**Note:** The standalone Shiny app provides the same functionality as the embedded components but in a separate interface with four tabs: Public Transport, Pedestrian Counts, On-street Parking, and Security View (Crime).
+   - (Make sure the R shiny tab is kept open when loading the Tableau file)
 
 ## System Requirements
 
-### For Tableau Dashboard:
 - Tableau Desktop 2020.4 or later
-- Internet connection (for API-based boundary data)
-- Minimum 8 GB RAM (16 GB recommended due to large geospatial datasets)
-
-### For Shiny Application:
 - R version 4.0 or higher
-- RStudio (recommended but not required)
-- Internet connection (for loading Melbourne municipal boundary from API)
-- Minimum 8 GB RAM (due to 362 MB public transport lines dataset)
+- RStudio
+- Internet connection (for loading Melbourne municipal boundary and parking bay data from API)
+- Minimum 8 GB RAM
 
 ### Required R Packages:
 ```r
