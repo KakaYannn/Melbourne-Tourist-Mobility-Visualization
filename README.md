@@ -12,6 +12,7 @@ The project consists of:
 ## How to Launch the Interface (For Markers)
 
 1. **Open Group2.R in RStudio and click Run App**
+   - Set working directory to root (location of this file)
 
 2. **Open IV Project.twb in Tableau**
 
