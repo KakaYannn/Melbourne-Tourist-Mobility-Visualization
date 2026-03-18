@@ -6,12 +6,12 @@ This project is a **Tableau dashboard with embedded Shiny elements** that visual
 
 The project consists of:
 - **Tableau Dashboard** (`IV project.twb`): Main visualization interface
-- **R Shiny Application** (`Group2.R`): Interactive web components embedded within Tableau
+- **R Shiny Application** (`melbourne_urban_dashboard_app.R`): Interactive web components embedded within Tableau
 - **Data Files** (`data/` folder): Geospatial and statistical datasets from official Melbourne government sources
 
 ## How to Launch the Interface (For Markers)
 
-1. **Open Group2.R in RStudio and click Run App**
+1. **Open melbourne_urban_dashboard_app.R in RStudio and click Run App**
    - Set working directory to root (location of this file)
 
 2. **Open IV Project.twb in Tableau**
@@ -66,7 +66,7 @@ The following files must remain in the project directory:
 - Main Tableau dashboard containing embedded Shiny visualizations
 - Primary interface for project assessment
 
-**Group2.R** (166 KB)
+**melbourne_urban_dashboard_app.R** (166 KB)
 - R Shiny application file
 - Can be run standalone or embedded in Tableau
 - Provides interactive mapping and filtering functionality
@@ -98,7 +98,7 @@ The following files must remain in the project directory:
 - `data/vic_suburbs.geojson.backup` (2.8 MB) - Suburb boundaries (fallback)
 
 **Project Organization:**
-- Application files: `Group2.R`, `IV project.twb`, `README.md` (project root)
+- Application files: `melbourne_urban_dashboard_app.R`, `IV project.twb`, `README.md` (project root)
 - Data files: All datasets in `data/` subfolder
 
 ## Application Features
@@ -193,7 +193,7 @@ The application loads the Melbourne municipal boundary via API instead of local 
 
 **Problem:** Shiny components not appearing
 - **Solution:** Verify R and required packages are installed
-- Check that `Group2.R` is in the same directory as the Tableau workbook
+- Check that `melbourne_urban_dashboard_app.R` is in the same directory as the Tableau workbook
 
 ### Shiny Application Issues
 
